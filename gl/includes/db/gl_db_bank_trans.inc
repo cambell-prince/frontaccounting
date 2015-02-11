@@ -183,7 +183,7 @@ function check_bank_account_history($delta_amount, $bank_account, $date = null, 
 
 	$balance += $balance_offset;
 	if (floatcmp($balance, -$delta_amount) < 0)
-		return array('amount' => $balance + $delta_amount, 'trans_date'=> $date);
+		return array('amount' => $balance + $delta_amount, 'trans_date'=> date2sql($date));
 
 	$balance += $delta_amount;
 
@@ -200,7 +200,10 @@ function check_bank_account_history($delta_amount, $bank_account, $date = null, 
 	while ($trans = db_fetch($history)) {
 		$balance += $trans['amount'];
 		if ($balance < 0)
+		{
+			$trans['amount'] = $balance;
 			return $trans;
+		}
 	}
 
 	return null;

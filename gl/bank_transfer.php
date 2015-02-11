@@ -86,7 +86,8 @@ function gl_payment_controls($trans_no)
 			$_POST['memo_'] = get_comments_string($to_trans['type'], $trans_no);
 			$_POST['FromBankAccount'] = $from_trans['bank_act'];
 			$_POST['ToBankAccount'] = $to_trans['bank_act'];
-			$_POST['amount'] = $to_trans['amount'];
+			$_POST['target_amount'] = price_format($to_trans['amount']);
+			$_POST['amount'] = price_format(-$from_trans['amount']);
 		} else {
 			$_POST['ref'] = $Refs->get_next(ST_BANKTRANSFER);
 			$_POST['memo_'] = '';
@@ -184,18 +185,20 @@ function check_valid_entries($trans_no)
 	$amnt_tr = input_num('charge') + input_num('amount');
 
 	if ($trans_no) {
-		if (null != ($problemTransaction = check_bank_transfer(
-			$trans_no, $_POST['FromBankAccount'], $_POST['ToBankAccount'], $_POST['DatePaid'], $amnt_tr
-		))) {
+		$problemTransaction = check_bank_transfer( $trans_no, $_POST['FromBankAccount'], $_POST['ToBankAccount'], $_POST['DatePaid'],
+			$amnt_tr, input_num('target_amount', $amnt_tr));
+
+		if ($problemTransaction != null	) {
 			if (!array_key_exists('trans_no', $problemTransaction)) {
 				display_error(sprintf(
-					_("This bank transfer would result in exceeding authorized overdraft limit of the account (%s)"),
-					price_format(-$problemTransaction['amount'])
+					_("This bank transfer change would result in exceeding authorized overdraft limit (%s) of the account '%s'"),
+					price_format(-$problemTransaction['amount']), $problemTransaction['bank_account_name']
 				));
 			} else {
 				display_error(sprintf(
-					_("This bank transfer would result in exceeding authorized overdraft limit for transaction: %s #%s on %s."),
-					$systypes_array[$problemTransaction['type']], $problemTransaction['trans_no'], sql2date($problemTransaction['trans_date'])
+					_("This bank transfer change would result in exceeding authorized overdraft limit on '%s' for transaction: %s #%s on %s."),
+					$problemTransaction['bank_account_name'], $systypes_array[$problemTransaction['type']],
+					$problemTransaction['trans_no'], sql2date($problemTransaction['trans_date'])
 				));
 			}
 			set_focus('amount');
