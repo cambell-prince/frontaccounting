@@ -209,7 +209,7 @@ function check_bank_transfer(
 	// 1) The original from account that is being voided. This results in funds being put back which is always fine.
 	// 2) The original to account that is being voided. This results in funds being removed which may result in a
 	//    negative balance in the account at some time and therefore needs to be checked.
-	$problemTransaction = check_bank_account_history(-$old_to['amount'], $old_to['bank_act'], sql2date($old_to['trans_date']), 0);
+	$problemTransaction = check_bank_account_history(-$old_to['amount'], $old_to['bank_act'], sql2date($old_to['trans_date']));
 	if ($problemTransaction) {
 		// If the destination account is the same as that being edited, it may be that this edit will resolve the
 		// problem of voiding.
@@ -217,12 +217,13 @@ function check_bank_transfer(
 			$problemTransaction = check_bank_account_history($amount - $old_to['amount'], $old_to['bank_act'], $date_);
 		}
 	}
+
 	if (null != $problemTransaction) {
 		$problemTransaction['account'] = $old_to['bank_act'];
 		$problemTransaction['bank_account_name'] = $old_to['bank_account_name'];
 		return $problemTransaction;
 	}
-	
+
 	// 3) The edited from account, that is having funds removed which may result in a
 	//    negative balance in the account at some time and therefore needs to be checked.
 	$problemTransaction = check_bank_account_history(-$amount, $from_account, $date_);
@@ -234,6 +235,7 @@ function check_bank_transfer(
 			$problemTransaction = check_bank_account_history(-$amount-$old_from['amount'], $from_account, $date_);
 		}
 	}
+
 	if (null != $problemTransaction) {
 		$problemTransaction['account'] = $old_from['bank_act'];
 		$problemTransaction['bank_account_name'] = $old_from['bank_account_name'];
