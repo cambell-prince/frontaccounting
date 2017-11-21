@@ -16,7 +16,7 @@ class TestUser extends current_user
 	{
 		$this->cur_con = 0;
 		$this->company = 0;
-		parent::current_user();
+		parent::__construct();
 	}
 }
 

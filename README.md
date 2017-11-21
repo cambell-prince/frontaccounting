@@ -1,6 +1,6 @@
 # FrontAccounting ERP
 
-[![Build Status](https://travis-ci.org/cambell-prince/frontaccounting.svg?branch=unstable-cp)](https://travis-ci.org/cambell-prince/frontaccounting)
+[![Build Status](https://travis-ci.org/cambell-prince/frontaccounting.svg?branch=master-cp)](https://travis-ci.org/cambell-prince/frontaccounting)
 
 [FrontAccounting ERP](http://frontaccounting.com) is open source, web-based accounting software for small and medium enterprises.
 It supports double entry accounting providing both low level journal entry and user friendly, document based 

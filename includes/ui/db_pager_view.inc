@@ -32,6 +32,13 @@ function navi_button_cell($name, $value, $enabled=true, $align='left') {
 function display_db_pager(&$pager) {
 	// Note that the return seems redundant CP 2014-11
 	return ControlRenderer::get()->pager($pager);
+        if ($pager->row_fun) {
+            if (function_exists($pager->row_fun)) {
+                $fn = $pager->row_fun;
+                $row = $fn($row);
+            }
+        }
+
 }
 
 ?>

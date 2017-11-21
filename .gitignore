@@ -4,6 +4,8 @@ vendor_bower/
 /backup/
 /.settings/
 /.vscode/
+/.idea/
+.fuse_*
 /company/*
 !/company/0
 /company/*/attachments
