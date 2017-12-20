@@ -205,10 +205,13 @@ class ListRenderer
 		$found = false;
 		$lastcat = null;
 		$edit = false;
+		$pname = false;
+		if (($type === "customer" || $type === "supplier") && !empty($SysPrefs->prefs['shortname_name_in_list']))
+			$pname = true;
 		if ($result = db_query($sql)) {
 			while ($contact_row = db_fetch($result)) {
 				$value = $contact_row[0];
-				$descr = $opts['format'] == null ? $contact_row[1] : call_user_func($opts['format'], $contact_row);
+				$descr = $opts['format'] == null ?  $contact_row[1] : call_user_func($opts['format'], $contact_row, $pname);
 				$sel = '';
 				if (get_post($search_button) && ($txt == $value)) {
 					$selected_id[] = $value;
@@ -488,14 +491,22 @@ class ListRenderer
 	}
 	
 	//----------------------------------------------------------------------------------------------
-	function _format_add_curr($row)
+	function _format_add_curr($row, $pname = false)
 	{
 		static $company_currency;
 
-		if ($company_currency == null) {
+		if ($company_currency == null)
+		{
 			$company_currency = get_company_currency();
 		}
-		return $row[1] . ($row[2] == $company_currency ? '' : ("&nbsp;-&nbsp;" . $row[2]));
+		if (!$pname)
+		{
+			return $row[1] . ($row[2] == $company_currency ? '' : ("&nbsp;-&nbsp;" . $row[2]));
+		}
+		else
+		{
+			return $row[1] . "&nbsp;-&nbsp;" . $row[2] . ($row[3] == $company_currency ? '' : ("&nbsp;-&nbsp;" . $row[3]));
+		}		
 	}
 
 	function add_edit_combo($type)
@@ -515,7 +526,11 @@ class ListRenderer
 
 	function supplier_list($name, $selected_id = null, $spec_option = false, $submit_on_change = false, $all = false, $editkey = false)
 	{
-		$sql = "SELECT supplier_id, supp_ref, curr_code, inactive FROM " . TB_PREF . "suppliers ";
+		global $SysPrefs;
+		if (!empty($SysPrefs->prefs['shortname_name_in_list']))
+			$sql = "SELECT supplier_id, supp_ref, supp_name, curr_code, inactive FROM ".TB_PREF."suppliers ";
+		else	
+			$sql = "SELECT supplier_id, supp_ref, curr_code, inactive FROM " . TB_PREF . "suppliers ";
 
 		$mode = get_company_pref('no_supplier_list');
 
@@ -563,8 +578,11 @@ class ListRenderer
 	function customer_list($name, $selected_id = null, $spec_option = false, $submit_on_change = false, $show_inactive = false, $editkey = false)
 	{
 		global $all_items;
-
-		$sql = "SELECT debtor_no, debtor_ref, curr_code, inactive FROM " . TB_PREF . "debtors_master ";
+		global $SysPrefs;
+		if (!empty($SysPrefs->prefs['shortname_name_in_list']))
+			$sql = "SELECT debtor_no, debtor_ref, name, curr_code, inactive FROM ".TB_PREF."debtors_master ";
+		else	
+			$sql = "SELECT debtor_no, debtor_ref, curr_code, inactive FROM " . TB_PREF . "debtors_master ";
 
 		$mode = get_company_pref('no_customer_list');
 
@@ -1215,27 +1233,29 @@ class ListRenderer
 	}
 
 	// ------------------------------------------------------------------------------------
-	function item_tax_types_list($name, $selected_id = null)
+	function item_tax_types_list($name, $selected_id = null, $show_inactive = false)
 	{
 		$sql = "SELECT id, name FROM " . TB_PREF . "item_tax_types";
+		if (!$show_inactive)
+			$sql .= " WHERE !inactive";
 		return combo_input($name, $selected_id, $sql, 'id', 'name', array(
 			'order' => 'id'
 		));
 	}
 
-	function item_tax_types_list_cells($label, $name, $selected_id = null)
+	function item_tax_types_list_cells($label, $name, $selected_id = null, $show_inactive = false)
 	{
 		if ($label != null)
 			echo "<td>$label</td>\n";
 		echo "<td>";
-		echo item_tax_types_list($name, $selected_id);
+		echo item_tax_types_list($name, $selected_id, $show_inactive);
 		echo "</td>\n";
 	}
 
-	function item_tax_types_list_row($label, $name, $selected_id = null)
+	function item_tax_types_list_row($label, $name, $selected_id = null, $show_inactive = false)
 	{
 		echo "<tr><td class='label'>$label</td>";
-		item_tax_types_list_cells(null, $name, $selected_id);
+		item_tax_types_list_cells(null, $name, $selected_id, $show_inactive);
 		echo "</tr>\n";
 	}
 
@@ -2087,7 +2107,7 @@ class ListRenderer
 		echo "</td>\n";
 	}
 
-	function cust_allocations_list_cells($label, $name, $selected = null)
+	function cust_allocations_list_cells($label, $name, $selected = null, $submit_on_change = false)
 	{
 		if ($label != null)
 			label_cell($label);
@@ -2095,12 +2115,12 @@ class ListRenderer
 		$allocs = array(
 			ALL_TEXT => _("All Types"),
 			'1' => _("Sales Invoices"),
-			'2' => _("Overdue Invoices"),
+			'2' => _("Unsettled transactions"),
 			'3' => _("Payments"),
 			'4' => _("Credit Notes"),
 			'5' => _("Delivery Notes")
 		);
-		echo array_selector($name, $selected, $allocs);
+		echo array_selector($name, $selected, $allocs, array('select_submit' => $submit_on_change));
 		echo "</td>\n";
 	}
 
@@ -2119,20 +2139,20 @@ class ListRenderer
 		echo "</td>\n";
 	}
 
-	function supp_transactions_list_cell($name, $selected = null)
+	function supp_transactions_list_cell($name, $selected=null, $submit_on_change=false)
 	{
 		echo "<td>\n";
 		$allocs = array(
 			ALL_TEXT => _("All Types"),
 			'6' => _("GRNs"),
 			'1' => _("Invoices"),
-			'2' => _("Overdue Invoices"),
+			'2' => _("Unsettled transactions"),
 			'3' => _("Payments"),
 			'4' => _("Credit Notes"),
 			'5' => _("Overdue Credit Notes")
 		);
 
-		echo array_selector($name, $selected, $allocs);
+		echo array_selector($name, $selected, $allocs, array('select_submit'=> $submit_on_change));
 		echo "</td>\n";
 	}
 

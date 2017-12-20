@@ -149,7 +149,7 @@ function get_extern_rate($curr_b, $provider = 'ECB', $date)
 	elseif ($provider == 'GOOGLE')
 	{
 		$filename = "/finance/converter?a=1&from={$curr_a}&to={$curr_b}";
-		$site = "www.google.com";
+		$site = "finance.google.com";
 	}
 	elseif ($provider == 'BLOOMBERG')
 	{
@@ -175,7 +175,8 @@ function get_extern_rate($curr_b, $provider = 'ECB', $date)
 	       	curl_close($ch);
 			// due to resolver bug in some curl versions (e.g. 7.15.5) 
 			// try again for constant IP.
-		   $site=$site_ip;
+			if (isset($site_ip))
+		   		$site=$site_ip;
 	   } while( ($contents == '') && $retry--);
 	   
 	} else {

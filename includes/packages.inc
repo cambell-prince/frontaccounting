@@ -19,7 +19,8 @@ define('PUBKEY_PATH', $path_to_root);
 // FrontAccounting package class
 //
 class package extends gzip_file {
-	function package($filename, $basedir=null)
+
+	function __construct($filename, $basedir=null)
 	{
 		global $path_to_root;
 
@@ -30,7 +31,7 @@ class package extends gzip_file {
 			} else
 			mkdir($basedir);
 		}
-		$this->archive($filename);
+		parent::__construct($filename);
 		$this->set_options(array('basedir'=> $basedir));
 		$this->options['type'] = "pkg";
 	}
@@ -299,6 +300,10 @@ function get_pkg_or_list($type = null, $pkgname = null, $filter=array(), $outkey
 		$sig = url_get_contents($repo.'/Release.sig');
 		$data = file_get_contents($loclist);
 		$cert = file_get_contents(PUBKEY_PATH.'/FA.pem');
+		if (!function_exists('openssl_verify')) {
+			display_error(_("OpenSSL have to be available on your server to use extension repository system."));
+			return null;
+		}	
 		if (openssl_verify($data, $sig, $cert) <= 0) {
 			if ($refresh) {
 				if (!@unlink($loclist))

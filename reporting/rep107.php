@@ -185,7 +185,7 @@ function print_invoices()
 			if ($memo != "")
 			{
 				$rep->NewLine();
-				$rep->TextColLines(1, 5, $memo, -2);
+				$rep->TextColLines(1, 3, $memo, -2);
 			}
 
    			$DisplaySubTot = number_format2($SubTotal,$dec);
@@ -268,7 +268,7 @@ function print_invoices()
 						$first = false;
     				}
     				else
-						$rep->TextCol(3, 7, _("Included") . " " . $tax_type_name . _("Amount") . ": " . $DisplayTax, -2);
+						$rep->TextCol(3, 6, _("Included") . " " . $tax_type_name . _("Amount") . ": " . $DisplayTax, -2);
 				}
     			else
     			{

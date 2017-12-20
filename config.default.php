@@ -70,9 +70,6 @@ if (!isset($path_to_root) || isset($_GET['path_to_root']) || isset($_POST['path_
 	/* This has been superseded with built in Audit Trail */
 	$use_audit_trail = 0;
 
-	/* $show_voiced_gl_trans = 0, setting this to 1 will show the voided gl trans */
-	$show_voided_gl_trans = 0;
-
 	/* use old style convert (income and expense in BS, PL) */
 	$use_oldstyle_convert = 0;
 
@@ -128,7 +125,7 @@ if (!isset($path_to_root) || isset($_GET['path_to_root']) || isset($_POST['path_
 	$config_allocation_settled_allowance = 0.005;
 
 	/* Show average costed values instead of fixed standard cost in report, Inventory Valuation Report */
-	$use_costed_values = 0;	
+	$use_costed_values = 1;	
 	
 	/* Show menu category icons in core themes */
 	$show_menu_category_icons = 1;
