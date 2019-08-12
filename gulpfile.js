@@ -234,9 +234,9 @@ gulp.task('test-e2e-travis', ['env-test'], function(cb) {
 
 gulp.task('test-chrome', ['env-test'], function(cb) {
   execute(
-    'mysql -u travis --password=\'\' -D fa_test -e "UPDATE 0_users SET theme=\'bootstrap\' WHERE user_id=\'test\'"',
+    'mysql -u travis --password=\'\' -D fa_test -e "UPDATE 0_users SET theme=\'default\' WHERE user_id=\'test\'"',
     null,
-    cb
+    function() {}
   )
   execute(
     '/usr/local/bin/protractor modules/tests/e2e/chrome-conf.js',
