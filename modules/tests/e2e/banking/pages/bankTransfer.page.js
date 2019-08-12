@@ -28,8 +28,10 @@ var BankTransferPage = function(transactionNo) {
     browser.sleep(700);
     page.date.clear();
     page.date.sendKeys(date);
-    page.amount.clear();
-    page.amount.sendKeys(amount);
+    page.amount.sendKeys(
+      protractor.Key.chord(protractor.Key.CONTROL, "a"),
+      amount
+    );
     if (memo) {
       page.memo.clear();
       page.memo.sendKeys(memo);

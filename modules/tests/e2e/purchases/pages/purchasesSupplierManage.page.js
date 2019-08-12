@@ -28,7 +28,7 @@ var PurchasesSupplierManagePage = function() {
   
   this.selectSupplier = function(shortName) {
     page.select.element(by.cssContainingText('option', shortName)).click();
-    browser.sleep(200);
+    browser.sleep(700);
   };
 
   this.getTitle = function() {

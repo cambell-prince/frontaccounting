@@ -23,10 +23,14 @@ var BankDepositPage = function(transactionNo) {
   this.deposit = function(to, date, amount, memo) {
     page.toAccount.element(by.cssContainingText('option', to)).click();
     browser.sleep(700);
-    page.date.clear();
-    page.date.sendKeys(date);
-    page.amount.clear();
-    page.amount.sendKeys(amount);
+    page.date.sendKeys(
+      protractor.Key.chord(protractor.Key.CONTROL, "a"),
+      date
+    );
+    page.amount.sendKeys(
+      protractor.Key.chord(protractor.Key.CONTROL, "a"),
+      amount
+    );
     page.addItemButton.click();
     browser.sleep(700);
     if (memo) {
