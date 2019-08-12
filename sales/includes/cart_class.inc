@@ -137,12 +137,19 @@ class Cart
 			$type = get_child_type($this->trans_type);
 
 		$this->trans_type = $type;
+		if ($type == ST_CUSTCREDIT)
+		{
+			$this->src_date = $this->document_date;
+		}
+
+		if ($type == ST_CUSTDELIVERY || $type == ST_SALESINVOICE)
+		{
+			$this->document_date = Today();
+		} else {
+			$this->document_date = new_doc_date();		
+		}
 		$this->reference = $Refs->get_next($this->trans_type, null, array('date' => $this->document_date,
 			'customer' => $this->customer_id, 'branch' => $this->Branch));
-		if ($type == ST_CUSTCREDIT)
-		    $this->src_date = $this->document_date;
-
-		$this->document_date = new_doc_date();
 
 		for($line_no = 0; $line_no < count($this->line_items); $line_no++) {
 			$line = &$this->line_items[$line_no];
