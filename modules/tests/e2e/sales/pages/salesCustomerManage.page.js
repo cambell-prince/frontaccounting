@@ -32,7 +32,7 @@ var SalesCustomerManagePage = function() {
   
   this.selectCustomer = function(shortName) {
     page.select.element(by.cssContainingText('option', shortName)).click();
-    browser.sleep(200);
+    browser.sleep(700);
   };
 
   this.getTitle = function() {
@@ -51,8 +51,10 @@ var SalesCustomerManagePage = function() {
 
   this.update = function(address) {
     this.pageElements();
-    page.address.clear();
-    page.address.sendKeys(address);
+    page.address.sendKeys(
+      protractor.Key.chord(protractor.Key.CONTROL, "a"),
+      address
+    );
     page.submit.click();
 //    browser.sleep(700);
   };
