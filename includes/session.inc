@@ -41,6 +41,9 @@ foreach ($installed_extensions as $ext)
 	if (file_exists($path_to_root.'/'.$ext['path'].'/hooks.php'))
 		include_once($path_to_root.'/'.$ext['path'].'/hooks.php');
 }
+
+ini_set('session.gc_maxlifetime', 36000); // moved from below.
+
 $Session_manager = new SessionManager();
 $Session_manager->sessionStart('FA'.md5(dirname(__FILE__)));
 
@@ -76,7 +79,7 @@ if ($SysPrefs->error_logfile != '') {
 */
 // ini_set('session.save_path', dirname(__FILE__).'/../tmp/');
 
-ini_set('session.gc_maxlifetime', 36000); // 10hrs
+// ini_set('session.gc_maxlifetime', 36000); // 10hrs - moved to before session_manager
 
 hook_session_start(@$_POST["company_login_name"]);
 
