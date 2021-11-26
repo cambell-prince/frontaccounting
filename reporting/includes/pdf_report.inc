@@ -1000,7 +1000,8 @@ class FrontReport extends Cpdf
 
 						$to = str_replace(",", "", $contact['name'].' '.$contact['name2'])
 							." <" . $contact['email'] . ">";
-						$msg = _("Dear") . " " . $contact['name'] . ",\n\n" 
+						$name = $contact['name2'] ? $contact['name2'] : $contact['name'];
+						$msg = _("Dear") . " " . $name . ",\n\n" 
 							. _("Our ") . " " . strtolower($subject) . _(" for hosted services for the year is attached.\n\n")
 							. _("You can pay online by internet banking (preferred), you can pay in person at any branch of the BNZ, or you can pay by posting a cheque to our office.\n\n")
 							. sprintf(_("Comments or questions? Reply to %s.  We're happy to help.\n\n"), $this->company['email']);

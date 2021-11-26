@@ -368,10 +368,10 @@ function get_sales_child_documents($trans_type, $trans_no)
 	// FIXME -  credit notes retrieved here should be those linked to invoices containing 
 	// at least one line from related invoice
 
-	if (!count($trans_no))
+	if (is_array($trans_no) && !count($trans_no))
 		return false;
 	$childs = get_sales_child_numbers($trans_type, $trans_no, false);
-	if (!count($childs))
+	if (is_array($childs) && !count($childs))
 		return false;
 		
 	$sql = "SELECT * FROM ".TB_PREF."debtor_trans
