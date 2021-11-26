@@ -12,6 +12,8 @@ upload-exclude.txt
 sql/
 config_db.php
 config.php
+installed_extensions.php
+company/
 modules/api
 modules/tests
 modules/import_paypal
