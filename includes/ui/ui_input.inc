@@ -328,7 +328,7 @@ function date_row(
 	$label, $name, $title=null, $check=null, $inc_days=0, $inc_months=0,
 	$inc_years=0, $params=null, $submit_on_change=false)
 {
-	InputRenderer::get()->date_row($label, $name, $check, $inc_days, $inc_months, $inc_years, $params, $submit_on_change);
+	InputRenderer::get()->date_row($label, $name, $title, $check, $inc_days, $inc_months, $inc_years, $params, $submit_on_change);
 }
 
 //-----------------------------------------------------------------------------------
