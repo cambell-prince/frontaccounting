@@ -1000,7 +1000,8 @@ class FrontReport extends Cpdf
 
 	    				$to = str_replace(",", "", $contact['name'].' '.$contact['name2'])
 	    					." <" . $contact['email'] . ">";
-    					$msg = _("Dear") . " " . $contact['name2'] . ",\n\n" 
+						$name = $contact['name2'] ? $contact['name2'] : $contact['name'];
+    					$msg = _("Dear") . " " . $name . ",\n\n" 
     						. _("Attached you will find ") . " " . $subject ."\n\n";
 
 						if (isset($this->formData['payment_service']))
