@@ -308,7 +308,7 @@ function link_row($label, $name, $value, $size, $max, $title=null, $params="", $
 
 function link_row_ex($label, $name, $size, $max=null, $title=null, $value=null, $params=null, $post_label=null)
 {
-	InputRenderer::get()->link_row_ex($label, $name, $size, $max, $title, $val, $params, $post_label);
+	InputRenderer::get()->link_row_ex($label, $name, $size, $max, $title, $value, $params, $post_label);
 }
 
 //-----------------------------------------------------------------------------------
