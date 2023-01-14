@@ -1509,7 +1509,7 @@ class ListRenderer
 		$sql = "SELECT reconciled, reconciled FROM " . TB_PREF . "bank_trans
 		WHERE bank_act=" . db_escape($account) . " AND reconciled IS NOT NULL
 		GROUP BY reconciled";
-		return combo_input($name, $selected_id, $sql, 'id', 'reconciled', array(
+		return combo_input($name, $selected_id, $sql, 'id', 'reconciled DESC', array(
 			'spec_option' => $special_option,
 			'format' => '_format_date',
 			'spec_id' => '',
