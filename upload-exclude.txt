@@ -19,6 +19,7 @@ modules/tests
 modules/import_paypal
 modules/import_transactions
 modules/sgw_gentry
+modules/sgw_import/uploads/*.csv
 themes/bootstrap/less
 themes/bootstrap/vendor/twbs
 themes/bootstrap/vendor/fortawesome/font-awesome/src
