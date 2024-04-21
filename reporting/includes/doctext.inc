@@ -116,7 +116,7 @@
 			$this->title = _("TAX INVOICE");
 			$this->formData['document_name'] =_("Invoice No.");
 			$this->formData['domicile'] = $this->company['domicile'];
-			$Footer[0] = _("Please quote invoice no.or domain name when paying. All amounts stated in"). " - " . $this->formData['curr_code'];
+			$Footer[0] = _("Please quote invoice no. or domain name when paying. All amounts stated in"). " - " . $this->formData['curr_code'];
 
 			$deliveries = get_sales_parent_numbers(ST_SALESINVOICE, $this->formData['trans_no']);
 			if ($SysPrefs->print_invoice_no() == 0)

@@ -1000,10 +1000,10 @@ class FrontReport extends Cpdf
 
 						$to = str_replace(",", "", $contact['name'].' '.$contact['name2'])
 							." <" . $contact['email'] . ">";
-						$name = $contact['name2'] ? $contact['name2'] : $contact['name'];
+						$name = $contact['name2'] ? $contact['name'] . ' ' . $contact['name2'] : $contact['name'];
 						$msg = _("Dear") . " " . $name . ",\n\n" 
-							. _("Our ") . " " . strtolower($subject) . _(" for hosted services for the year is attached.\n\n")
-							. _("You can pay online by internet banking (preferred), you can pay in person at any branch of the BNZ, or you can pay by posting a cheque to our office.\n\n")
+							. _("Our ") . " " . strtolower($subject) . _(" for supplied services for the next period is attached.\n\n")
+							. _("You can pay online by internet banking (preferred), you can pay in person at any branch of the BNZ in New Zealand, or our Wise account in the USA.\n\n")
 							. sprintf(_("Comments or questions? Reply to %s.  We're happy to help.\n\n"), $this->company['email']);
 
 						if (isset($this->formData['payment_service']))
@@ -1027,7 +1027,7 @@ class FrontReport extends Cpdf
 						$mail->text($msg . $sender);
 						$mail->attachment($fname, $this->filename);
 						$emails .= " " . $contact['email'];
-						if ($mail->send()) $sent++;
+						// if ($mail->send()) $sent++;
 					} // foreach contact
 					unlink($fname);
 					$this->SetLang(user_language());

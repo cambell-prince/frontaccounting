@@ -178,7 +178,7 @@ function get_sql_for_customer_branches($customer_id)
 	$default - return only single record selected with defaults order defined in $defs array,
 	 otherways get all $action contacts
 */
-function get_branch_contacts($branch_code, $action=null, $customer_id=null, $default = true)
+function get_branch_contacts($branch_code, $action=null, $customer_id=null, $default = true, $first = true)
 {
 	$defs = array('cust_branch.'.$action, 
 				'customer.'.$action,
@@ -205,7 +205,7 @@ function get_branch_contacts($branch_code, $action=null, $customer_id=null, $def
 	while($contact = db_fetch($res))
 		$results[] = $contact;
 
-	if ($results && $default) {
+	if ($results && $first) {
 		// select first available contact in $defs order
 		foreach($defs as $type) {
 			if ($n = array_search_value($type, $results, 'ext_type'))
