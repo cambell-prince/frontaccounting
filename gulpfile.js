@@ -113,7 +113,7 @@ gulp.task('upload-demo', function(cb) {
   var options = {
     dryRun: false,
     silent : false,
-    src : "htdocs",
+    src : ".",
     dest : "root@saygoweb.com:/var/www/virtual/saygoweb.com/demo/htdocs/frontaccounting/",
     key : ""
   };
