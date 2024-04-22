@@ -1027,7 +1027,7 @@ class FrontReport extends Cpdf
 						$mail->text($msg . $sender);
 						$mail->attachment($fname, $this->filename);
 						$emails .= " " . $contact['email'];
-						// if ($mail->send()) $sent++;
+						if ($mail->send()) $sent++;
 					} // foreach contact
 					unlink($fname);
 					$this->SetLang(user_language());
