@@ -1,78 +1,73 @@
-# FrontAccounting test/development image: Apache + mod_php.
+# FrontAccounting test/development image: Debian trixie, Apache + mod_php.
 #
-# PHP_VERSION is chosen in docker/.env. FrontAccounting 2.4.x is written against
-# PHP 5.4-7.x, so 7.4 is the newest version the code is actually known to run on
-# and is the default here; .devcontainer builds on 7.4 too.
-ARG PHP_VERSION=7.4
-FROM php:${PHP_VERSION}-apache
+# The official php:7.4-* images are built on Debian bullseye, whose LTS ended on
+# 2026-08-31 — deb.debian.org still serves the bullseye-security index but not
+# the packages it points at, so those images can only be built against
+# archive.debian.org. There is no 7.4 image on trixie and never will be; PHP 7.4
+# itself went end-of-life in 2022.
+#
+# So the base is plain Debian trixie and PHP comes from Ondřej Surý's
+# repository, which still builds 7.4 for current Debian. That keeps the OS
+# supported and patched while FrontAccounting 2.4.x stays on the PHP version it
+# is actually written against.
+FROM debian:trixie-slim
 
+# Any version sury publishes for trixie: 7.4, 8.0 … 8.4. FA 2.4.x is written
+# against PHP 5.4-7.x, so 7.4 is the newest it is known to run on.
+ARG PHP_VERSION=7.4
 ARG INSTALL_XDEBUG=true
 
-# php:7.4-* images are built on Debian bullseye, whose LTS ended on 2026-08-31:
-# deb.debian.org still serves the bullseye-security index but no longer serves
-# the .deb files it points at, so a stock `apt-get install` here fails with a
-# wall of 404s. Point at the archive instead, and at main alone — the archive
-# has no Release file for bullseye-security, and an EOL suite has no further
-# security updates to miss. Newer PHP_VERSIONs are built on bookworm or later
-# and are left untouched.
-RUN set -eux; \
-    codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"; \
-    case "$codename" in \
-        buster|bullseye) \
-            printf 'deb http://archive.debian.org/debian %s main\n' "$codename" \
-                > /etc/apt/sources.list; \
-            rm -f /etc/apt/sources.list.d/*.list; \
-            printf 'Acquire::Check-Valid-Until "false";\n' \
-                > /etc/apt/apt.conf.d/99archive; \
-            ;; \
-    esac
+ENV DEBIAN_FRONTEND=noninteractive
 
-# mysqli is required (includes/db/connect_db_mysqli.inc), gd is used by the
-# reporting/ PDF and chart code, gettext gives native _() instead of FA's slower
-# PHP emulation, and zip keeps composer from falling back to unzipping by hand.
-# The mariadb client is what `docker/fa mysql` and the db load/dump commands use.
 RUN set -eux; \
     apt-get update; \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        default-mysql-client \
-        libfreetype6-dev \
-        libjpeg62-turbo-dev \
-        libpng-dev \
-        libzip-dev \
-        unzip \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        gnupg \
         ; \
-    if [ "$(php -r 'echo PHP_VERSION_ID;')" -ge 70400 ]; then \
-        docker-php-ext-configure gd --with-freetype --with-jpeg; \
-    else \
-        docker-php-ext-configure gd --with-freetype-dir=/usr --with-jpeg-dir=/usr; \
-    fi; \
-    docker-php-ext-install -j"$(nproc)" gd gettext mysqli pdo_mysql zip; \
+    install -d -m 0755 /etc/apt/keyrings; \
+    curl -fsSL https://packages.sury.org/php/apt.gpg \
+        -o /etc/apt/keyrings/sury-php.gpg; \
+    echo "deb [signed-by=/etc/apt/keyrings/sury-php.gpg] https://packages.sury.org/php/ trixie main" \
+        > /etc/apt/sources.list.d/sury-php.list; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*
 
-# Pinned per PHP version: the 3.1 line is the last supporting PHP 7.2-7.4.
-# The settings live in xdebug's own conf.d file rather than the general one
-# because the entrypoint enables and disables the whole file as a unit — see
-# docker-entrypoint.sh for why it has to be off rather than merely idle.
+# mysqli is required (includes/db/connect_db_mysqli.inc); gd is used by the
+# reporting/ PDF and chart code; mbstring, xml and zip are what the extension
+# installer and composer expect. gettext gives native _() rather than FA's
+# slower PHP emulation and comes bundled in php-common. mariadb-client is what
+# `docker/fa mysql` and the db load/dump commands use.
 RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        apache2 \
+        mariadb-client \
+        unzip \
+        libapache2-mod-php${PHP_VERSION} \
+        php${PHP_VERSION}-cli \
+        php${PHP_VERSION}-common \
+        php${PHP_VERSION}-curl \
+        php${PHP_VERSION}-gd \
+        php${PHP_VERSION}-mbstring \
+        php${PHP_VERSION}-mysql \
+        php${PHP_VERSION}-xml \
+        php${PHP_VERSION}-zip \
+        ; \
     if [ "${INSTALL_XDEBUG}" = "true" ]; then \
-        if [ "$(php -r 'echo PHP_VERSION_ID;')" -lt 80000 ]; then \
-            pecl install xdebug-3.1.6; \
-        else \
-            pecl install xdebug-3.3.2; \
-        fi; \
-        docker-php-ext-enable xdebug; \
-        { \
-            echo 'xdebug.mode = ${XDEBUG_MODE}'; \
-            echo 'xdebug.client_host = host.docker.internal'; \
-            echo 'xdebug.client_port = 9003'; \
-            echo 'xdebug.start_with_request = trigger'; \
-        } >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini; \
-    fi
+        apt-get install -y --no-install-recommends php${PHP_VERSION}-xdebug; \
+    fi; \
+    apt-get clean; \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
-COPY php.ini /usr/local/etc/php/conf.d/zz-frontaccounting.ini
+# Debian keeps a conf.d per SAPI rather than the single one the php images have,
+# and the CLI (phpunit, composer) must see the same settings as Apache.
+COPY php.ini /etc/php/${PHP_VERSION}/apache2/conf.d/zz-frontaccounting.ini
+COPY php.ini /etc/php/${PHP_VERSION}/cli/conf.d/zz-frontaccounting.ini
+
 COPY apache-frontaccounting.conf /etc/apache2/conf-available/frontaccounting.conf
 
 RUN set -eux; \
@@ -92,11 +87,16 @@ RUN set -eux; \
         usermod -o -u "${USER_UID}" -g "${USER_GID}" www-data; \
     fi
 
+# phpenmod/phpdismod in the entrypoint need to know which version to act on, and
+# docker/fa reads neither — so bake the build's choice into the environment.
+ENV PHP_VERSION=${PHP_VERSION}
+
 WORKDIR /var/www/html
+
+EXPOSE 80
 
 COPY docker-entrypoint.sh /usr/local/bin/fa-entrypoint
 RUN chmod +x /usr/local/bin/fa-entrypoint
 
-# Replaces the base image's ENTRYPOINT, so its CMD has to be restated.
 ENTRYPOINT ["fa-entrypoint"]
-CMD ["apache2-foreground"]
+CMD ["apache2ctl", "-D", "FOREGROUND"]
