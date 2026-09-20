@@ -124,6 +124,11 @@ listen on port 9003; it starts on trigger, so set an `XDEBUG_TRIGGER` cookie or
 query parameter. `XDEBUG_MODE=coverage` is what `docker/fa test --coverage-html
 tmp/coverage` needs.
 
+`docker/fa` folds `develop` into whatever mode you ask for, so `debug` becomes
+`develop,debug`. That is the same trap from the other side: with the extension
+loaded but the mode lacking `develop`, `xdebug_call_file()` exists and throws,
+and the suite goes back to erroring 7/7.
+
 `docker/fa logs errors` follows FrontAccounting's own `tmp/errors.log`;
 `docker/fa logs app` follows Apache's.
 
