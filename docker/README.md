@@ -37,8 +37,11 @@ It also creates `tmp/` and the `company/0/` subdirectories, which `.gitignore`
 keeps out of a fresh clone but FrontAccounting writes to at runtime.
 
 Apache runs as `www-data` remapped to your uid/gid, so generated PDFs, cached JS
-and uploads stay owned by you on the host. `docker/fa perms` puts that right if
-it ever drifts.
+and uploads stay owned by you on the host. `test`, `composer`, `shell` and
+`exec` run as that same user for the same reason — `docker compose exec`
+otherwise runs as root, and one `composer install` would leave the whole of
+`modules/tests/vendor` owned by root:root in your checkout. `docker/fa perms`
+puts ownership right if it ever drifts anyway.
 
 ## Datasets
 

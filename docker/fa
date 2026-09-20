@@ -101,6 +101,24 @@ c_exec_tty() {
     compose exec "${tty_args[@]}" "$@"
 }
 
+# As the host user, for anything that writes into the bind-mounted checkout.
+#
+# `docker compose exec` runs as the image's user, which is root here — Apache
+# only drops to www-data for its workers. So `composer install` through a plain
+# exec leaves all 1600 files of modules/tests/vendor owned by root:root on the
+# host, where they cannot be edited or even deleted without sudo. HOME goes to
+# /tmp because the host uid has no home directory in this image and composer
+# needs somewhere to put its cache.
+c_exec_user() {
+    local tty_args=()
+    [ -t 0 ] && [ -t 1 ] || tty_args=(-T)
+    compose exec "${tty_args[@]}" \
+        --user "$USER_UID:$USER_GID" \
+        -e HOME=/tmp \
+        -e COMPOSER_HOME=/tmp/composer \
+        "$@"
+}
+
 running() {
     local id
     id="$(compose ps -q "$SERVICE" 2>/dev/null)" || return 1
@@ -499,24 +517,25 @@ cmd_test() {
         || die "phpunit is still missing after composer install.
 Remove modules/tests/vendor and run 'docker/fa test' again."
 
-    c_exec_tty -w "$APP_ROOT" "$SERVICE" \
+    c_exec_user -w "$APP_ROOT" "$SERVICE" \
         php "$PHPUNIT" -c modules/tests/phpunit.xml "$@"
 }
 
 cmd_composer() {
     ensure_running
-    c_exec_tty -w "$APP_ROOT" "$SERVICE" composer "$@"
+    c_exec_user -w "$APP_ROOT" "$SERVICE" composer "$@"
 }
 
 cmd_shell() {
     ensure_running
-    compose exec -w "$APP_ROOT" "$SERVICE" bash
+    compose exec -w "$APP_ROOT" --user "$USER_UID:$USER_GID" -e HOME=/tmp \
+        "$SERVICE" bash
 }
 
 cmd_exec() {
     [ $# -gt 0 ] || die "usage: fa exec <command> [args...]"
     ensure_running
-    c_exec_tty -w "$APP_ROOT" "$SERVICE" "$@"
+    c_exec_user -w "$APP_ROOT" "$SERVICE" "$@"
 }
 
 cmd_mysql() {
@@ -540,11 +559,14 @@ cmd_logs() {
     esac
 }
 
+# Deliberately root, unlike the other exec commands: chown is the one thing here
+# that needs to be.
 cmd_perms() {
     ensure_running
     info "restoring ownership of the checkout to $USER_UID:$USER_GID"
     c_exec chown -R "$USER_UID:$USER_GID" \
-        "$APP_ROOT/tmp" "$APP_ROOT/company" 2>/dev/null || true
+        "$APP_ROOT/tmp" "$APP_ROOT/company" "$APP_ROOT/modules/tests/vendor" \
+        2>/dev/null || true
 }
 
 cmd_info() {
