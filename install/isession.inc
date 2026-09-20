@@ -9,6 +9,9 @@
 	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 	See the License here <http://www.gnu.org/licenses/gpl-3.0.html>.
 ***********************************************************************/
+define('VARLIB_PATH', $path_to_root.'/tmp');
+define('VARLOG_PATH', $path_to_root.'/tmp');
+
 function output_html($text)
 {
 	global $before_box, $Ajax, $messages;
@@ -28,7 +31,7 @@ function output_html($text)
 //
 function strip_quotes($data)
 {
-	if(get_magic_quotes_gpc()) {
+	if(version_compare(phpversion(), '5.4', '<') && get_magic_quotes_gpc()) {
 		if(is_array($data)) {
 			foreach($data as $k => $v) {
 				$data[$k] = strip_quotes($data[$k]);
@@ -106,23 +109,36 @@ $inst_langs = array(
   'el_GR' => array ( 'name' => 'Greek',	'code' => 'el_GR',	'encoding' => 'utf-8'),
   'es_MX' => array ( 'name' => 'Spanish',	'code' => 'es_MX',	'encoding' => 'iso-8859-1'),
   'fr_FR' => array ( 'name' => 'Français',	'code' => 'fr_FR',	'encoding' => 'iso-8859-1'),
+  'hi_IN' => array ( 'name' => 'Hindi',	'code' => 'hi_IN',	'encoding' => 'utf-8'),
   'id_ID' => array ( 'name' => 'Indonesian','code' => 'id_ID',	'encoding' => 'iso-8859-1'),
   'it_IT' => array ( 'name' => 'Italian','code' => 'it_IT',	'encoding' => 'iso-8859-1'),
   'ka_GE' => array ( 'name' => 'Georgian','code' => 'ka_GE',	'encoding' => 'utf-8'),
-  'nl_BE' => array ( 'name' => 'Nederlands','code' => 'nl_BE',	'encoding' => 'iso-8859-1'),
+  'nb_NO' => array ( 'name' => 'Norwegian','code' => 'nb_NO',	'encoding' => 'iso-8859-1'),
+  'nl_BE' => array ( 'name' => 'Nederlands (Belgian)','code' => 'nl_BE',	'encoding' => 'iso-8859-1'),
+  'nl_NL' => array ( 'name' => 'Nederlands (Netherlands)','code' => 'nl_NL',	'encoding' => 'iso-8859-1'),
   'pl_PL' => array ( 'name' => 'Polski',	'code' => 'pl_PL',	'encoding' => 'iso-8859-2'),
   'pt_BR' => array ( 'name' => 'Português (Brasilia)','code' => 'pt_BR',	'encoding' => 'iso-8859-1'),
   'pt_PT' => array ( 'name' => 'Português','code' => 'pt_PT',	'encoding' => 'iso-8859-1'),
   'sv_SE' => array ( 'name' => 'Svenska',	'code' => 'sv_SE',	'encoding' => 'iso-8859-1'),
+  'ta_IN' => array ( 'name' => 'Tamil',	'code' => 'ta_IN',	'encoding' => 'utf-8'),
+  'vi_VN' => array ( 'name' => 'Vietnamese',	'code' => 'vi_VN',	'encoding' => 'utf-8'),
   'zh_CN' => array ( 'name' => 'Chinese Simplifed',	'code' => 'zh_CN',	'encoding' => 'utf-8'),
 );
+
+if ($SysPrefs->go_debug > 0)
+	$cur_error_level = -1;
+else
+	$cur_error_level = E_USER_WARNING|E_USER_ERROR|E_USER_NOTICE;
+
+error_reporting($cur_error_level);
+ini_set("display_errors", "On");
 
 $Ajax = new Ajax();
 
 get_text_init();
 
 $i_lang = isset($_POST['inst_lang']) ? $_POST['inst_lang'] : 
- 	(isset($_SESSION['inst_set']['inst_lang']) ? $_SESSION['inst_set']['inst_lang'] : array('C'));
+ 	(isset($_SESSION['inst_set']['inst_lang']) ? $_SESSION['inst_set']['inst_lang'] : 'C');
 
 // Page Initialisation
 if (!isset($_SESSION['language']) || !method_exists($_SESSION['language'], 'set_language')
@@ -130,7 +146,7 @@ if (!isset($_SESSION['language']) || !method_exists($_SESSION['language'], 'set_
 {
 	$l = array_search_value($i_lang, $inst_langs,  'code');
 	$_SESSION['language'] = new language($l['name'], $l['code'], $l['encoding'],
-	 isset($l['rtl']) ? 'rtl' : 'ltr');
+	 @isset($l['rtl']) ? 'rtl' : 'ltr');
 
 }
 if (!isset($installed_languages))

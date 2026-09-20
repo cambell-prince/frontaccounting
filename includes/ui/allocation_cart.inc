@@ -15,7 +15,7 @@
 */
 //-----------------------------------------------------------------------------------
 
-class allocation 
+class allocation
 {
 
 	var $trans_no; 
@@ -26,6 +26,7 @@ class allocation
 	var $person_curr;
 	var $date_;
 	var $amount = 0; /*Total amount of the transaction in FX */
+	var $bank_amount = 0;
 	var $currency;
 
 	var $allocs; /*array of transactions allocated to */
@@ -52,12 +53,12 @@ class allocation
 	}
 
 	function add_item($type, $type_no, $date_, $due_date, $amount, $amount_allocated, 
-		$current_allocated, $ref)
+		$current_allocated, $ref, $foreign_ref)
 	{
 		if (floatcmp($amount, 0))
 		{
 			$this->allocs[count($this->allocs)] = new allocation_item($type, $type_no, 
-				$date_, $due_date, $amount, $amount_allocated, $current_allocated, $ref);
+				$date_, $due_date, $amount, $amount_allocated, $current_allocated, $ref, $foreign_ref);
 			return true;
 		} 
 		else 
@@ -67,12 +68,12 @@ class allocation
 	}
 	
 	function update_item($index, $type, $type_no, $date_, $due_date, 
-		$amount, $amount_allocated, $current_allocated, $ref)
+		$amount, $amount_allocated, $current_allocated, $ref, $foreign_ref)
 	{
 		if (floatcmp($amount, 0))
 		{
 			$this->allocs[$index] = new allocation_item($type, $type_no, 
-				$date_, $due_date, $amount, $amount_allocated, $current_allocated, $ref);
+				$date_, $due_date, $amount, $amount_allocated, $current_allocated, $ref, $foreign_ref);
 			return true;
 		} 
 		else 
@@ -82,7 +83,7 @@ class allocation
 	}
 	
 	function add_or_update_item($type, $type_no, $date_, $due_date, 
-		$amount, $amount_allocated, $current_allocated, $ref)
+		$amount, $amount_allocated, $current_allocated, $ref, $foreign_ref)
 	{
 		for ($i = 0; $i < count($this->allocs); $i++) 
 		{
@@ -90,11 +91,11 @@ class allocation
 			if (($item->type == $type) && ($item->type_no == $type_no)) 
 			{
 				return $this->update_item($i, $type, $type_no, $date_, $due_date, 
-					$amount, $amount_allocated, $current_allocated, $ref);
+					$amount, $amount_allocated, $current_allocated, $ref, $foreign_ref);
 			}
 		}
         return $this->add_item($type, $type_no, $date_, $due_date, 
-        	$amount, $amount_allocated, $current_allocated, $ref);
+        	$amount, $amount_allocated, $current_allocated, $ref, $foreign_ref);
 	}
 
 	//
@@ -134,7 +135,7 @@ class allocation
 				$this->amount = $trans["Total"];
 			}
 		}
-	/* Now populate the array of possible (and previous actual) allocations 
+		/* Now populate the array of possible (and previous actual) allocations 
 		for this customer/supplier. First get the transactions that have 
 		outstanding balances ie Total-alloc >0 */
 
@@ -153,14 +154,14 @@ class allocation
 					$myrow["Total"], // trans total
 					$myrow["alloc"], // trans total allocated
 					0,
-					$myrow["reference"]); // this allocation
+					$myrow["reference"], $this->person_type==PT_SUPPLIER ? $myrow["supp_reference"] : $myrow["customer_ref"]);
 			}
 		}
 		if ($this->trans_no == 0) return; // this is new payment
 
-	/* Now get trans that might have previously been allocated to by this trans
-	NB existing entries where still some of the trans outstanding entered from
-	above logic will be overwritten with the prev alloc detail below */
+		/* Now get trans that might have previously been allocated to by this trans
+		NB existing entries where still some of the trans outstanding entered from
+		above logic will be overwritten with the prev alloc detail below */
 
 		if ($this->person_type==PT_SUPPLIER)
 			$trans_items = get_allocatable_to_supp_transactions($this->person_id, 
@@ -169,13 +170,35 @@ class allocation
 		 	$trans_items = get_allocatable_to_cust_transactions($this->person_id, 
 				$this->trans_no, $this->type);
 
+		$amount = $this->amount;
 		while ($myrow = db_fetch($trans_items))
 		{
+			$amount -= $myrow["Total"];
 			$this->add_or_update_item ($myrow["type"], $myrow["trans_no"],
 				sql2date($myrow["tran_date"]),
 				sql2date($myrow["due_date"]),
 				$myrow["Total"],
-				$myrow["alloc"] - $myrow["amt"], $myrow["amt"], $myrow["reference"]);
+				$myrow["alloc"] - $myrow["amt"], $myrow["amt"], $myrow["reference"],
+				$this->person_type==PT_SUPPLIER ? $myrow["supp_reference"] : $myrow["customer_ref"]);
+		}
+
+		/* Finally, if there any unallocated money remaining, assign the unallocated portion to
+		the earliest transactions. This makes the javascript All/None keys consistent
+		with the transaction amount. */
+
+		if ($amount > 0) {
+			foreach ($this->allocs as $alloc_item) {
+				$allocatable = $alloc_item->amount - $alloc_item->amount_allocated;
+				if ($allocatable > 0) {
+					if ($amount >= $allocatable) {
+						$alloc_item->current_allocated = $allocatable;
+						$amount -= $allocatable;
+					} else {
+						$alloc_item->current_allocated += $amount;
+						break;
+					}
+				}
+			}
 		}
 	}
 	//
@@ -253,15 +276,17 @@ class allocation_item
 	var $ref;
 	
 	var $current_allocated;
-	
+	var $foreign_ref;
+
 	function __construct($type, $type_no, $date_, $due_date, $amount, 
-		$amount_allocated, $current_allocated, $ref)
+		$amount_allocated, $current_allocated, $ref, $foreign_ref)
 	{
 
 		$this->type = $type;
 		$this->type_no = $type_no;
 
 		$this->ref = $ref;
+		$this->foreign_ref = $foreign_ref;
 
 		$this->date_ = $date_;
 		$this->due_date = $due_date;
@@ -287,7 +312,7 @@ function show_allocatable($show_totals) {
 	{
 		display_heading(sprintf(_("Allocated amounts in %s:"), $cart->person_curr));
 		start_table(TABLESTYLE, "width='60%'");
-   		$th = array(_("Transaction Type"), _("#"), $supp_ref ? _("Supplier Ref"): _("Ref"), _("Date"), _("Due Date"), _("Amount"),
+   		$th = array(_("Transaction Type"), _("#"), _("Ref"), $supp_ref ? _("Supplier Ref") : _("Customer Ref"), _("Date"), _("Due Date"), _("Amount"),
    			_("Other Allocations"), _("Left to Allocate"), _("This Allocation"),'','');
 
 	   	table_header($th);
@@ -300,6 +325,7 @@ function show_allocatable($show_totals) {
     			label_cell($systypes_array[$alloc_item->type]);
 	   			label_cell(get_trans_view_str($alloc_item->type, $alloc_item->type_no), "nowrap align='right'");
 		   		label_cell($alloc_item->ref);
+		   		label_cell($alloc_item->foreign_ref);
     			label_cell($alloc_item->date_, "align=right");
     			label_cell($alloc_item->due_date, "align=right");
 	    		amount_cell(abs($alloc_item->amount));
@@ -310,9 +336,9 @@ function show_allocatable($show_totals) {
 	    		$un_allocated = round((abs($alloc_item->amount) - $alloc_item->amount_allocated), 6);
 	    		amount_cell($un_allocated, false,'', 'maxval'.$id);
     			amount_cells(null, "amount" . $id);//, input_num('amount' . $id));
-				label_cell("<a href='#' name=Alloc$id onclick='allocate_all(this.name.substr(5));return true;'>"
+				label_cell("<a href='javascript:void(0)' name=Alloc$id onclick='allocate_all(this.name.substr(5));return true;'>"
 					 . _("All") . "</a>");
-				label_cell("<a href='#' name=DeAll$id onclick='allocate_none(this.name.substr(5));return true;'>"
+				label_cell("<a href='javascript:void(0)' name=DeAll$id onclick='allocate_none(this.name.substr(5));return true;'>"
 					 . _("None") . "</a>".hidden("un_allocated" . $id, 
 					 price_format($un_allocated), false));
 				end_row();
@@ -371,9 +397,32 @@ function check_allocations()
 			return false;
 		 }
 
-		 $_SESSION['alloc']->allocs[$counter]->current_allocated = input_num('amount' . $counter);
+		if ($_SESSION['alloc']->person_type == PT_CUSTOMER) {
+			if ($_SESSION['alloc']->allocs[$counter]->type == ST_SALESORDER)
+				$trans = get_sales_order_header($_SESSION['alloc']->allocs[$counter]->type_no, $_SESSION['alloc']->allocs[$counter]->type);
+			else
+				$trans = get_customer_trans($_SESSION['alloc']->allocs[$counter]->type_no, $_SESSION['alloc']->allocs[$counter]->type,$_SESSION['alloc']->person_id);
 
-		 $total_allocated += input_num('amount' . $counter);
+			if ($trans['debtor_no'] != $_SESSION['alloc']->person_id) {
+				display_error(_("Allocated transaction allocated is not related to company selected."));
+				set_focus('amount'.$counter);
+				return false;
+			}
+		} elseif ($_SESSION['alloc']->person_type == PT_SUPPLIER) {
+			if ($_SESSION['alloc']->allocs[$counter]->type == ST_PURCHORDER)
+                $trans = get_po($_SESSION['alloc']->allocs[$counter]->type_no);
+            else
+                $trans = get_supp_trans($_SESSION['alloc']->allocs[$counter]->type_no, $_SESSION['alloc']->allocs[$counter]->type,  $_SESSION['alloc']->person_id);			
+			if ($trans['supplier_id'] != $_SESSION['alloc']->person_id) {
+				display_error(_("Allocated transaction allocated is not related to company selected."));
+				set_focus('amount'.$counter);
+				return false;
+			}
+		}
+
+		$_SESSION['alloc']->allocs[$counter]->current_allocated = input_num('amount' . $counter);
+
+		$total_allocated += input_num('amount' . $counter);
 	}
 
 	$amount = abs($_SESSION['alloc']->amount);

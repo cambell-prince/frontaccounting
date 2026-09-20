@@ -194,9 +194,9 @@ function _format_stock_items($row)
 	return ListRenderer::get()->_format_stock_items($row);
 }
 
-function stock_items_list_cells($label, $name, $selected_id = null, $all_option = false, $submit_on_change = false, $all = false, $editkey = false)
+function stock_items_list_cells($label, $name, $selected_id = null, $all_option = false, $submit_on_change = false, $all = false, $editkey = false, $opts = array())
 {
-	return ListRenderer::get()->stock_items_list_cells($label, $name, $selected_id, $all_option, $submit_on_change, $all, $editkey);
+	return ListRenderer::get()->stock_items_list_cells($label, $name, $selected_id, $all_option, $submit_on_change, $all, $editkey, $opts);
 }
 
 /*
@@ -376,19 +376,19 @@ function sales_persons_list_row($label, $name, $selected_id = null, $spec_opt = 
 }
 
 // ------------------------------------------------------------------------------------
-function sales_areas_list($name, $selected_id = null)
+function sales_areas_list($name, $selected_id = null, $special_option = false)
 {
-	return ListRenderer::get()->sales_areas_list($name, $selected_id);
+	return ListRenderer::get()->sales_areas_list($name, $selected_id, $special_option);
 }
 
-function sales_areas_list_cells($label, $name, $selected_id = null)
+function sales_areas_list_cells($label, $name, $selected_id = null, $special_option = false)
 {
-	return ListRenderer::get()->sales_areas_list_cells($label, $name, $selected_id);
+	return ListRenderer::get()->sales_areas_list_cells($label, $name, $selected_id, $special_option);
 }
 
-function sales_areas_list_row($label, $name, $selected_id = null)
+function sales_areas_list_row($label, $name, $selected_id = null, $special_option = false)
 {
-	return ListRenderer::get()->sales_areas_list_row($label, $name, $selected_id);
+	return ListRenderer::get()->sales_areas_list_row($label, $name, $selected_id, $special_option);
 }
 
 // ------------------------------------------------------------------------------------
@@ -623,9 +623,9 @@ function gl_account_types_list_row($label, $name, $selected_id = null, $all_opti
 }
 
 // -----------------------------------------------------------------------------------------------
-function gl_all_accounts_list($name, $selected_id = null, $skip_bank_accounts = false, $cells = false, $all_option = false, $submit_on_change = false, $all = false)
+function gl_all_accounts_list($name, $selected_id = null, $skip_bank_accounts = false, $cells = false, $all_option = false, $submit_on_change = false, $all = false, $type_id = false)
 {
-	return ListRenderer::get()->gl_all_accounts_list($name, $selected_id, $skip_bank_accounts, $cells, $all_option, $submit_on_change, $all);
+	return ListRenderer::get()->gl_all_accounts_list($name, $selected_id, $skip_bank_accounts, $cells, $all_option, $submit_on_change, $all, $type_id);
 }
 
 function _format_account($row)
@@ -633,14 +633,14 @@ function _format_account($row)
 	return ListRenderer::get()->_format_account($row);
 }
 
-function gl_all_accounts_list_cells($label, $name, $selected_id = null, $skip_bank_accounts = false, $cells = false, $all_option = false, $submit_on_change = false, $all = false)
+function gl_all_accounts_list_cells($label, $name, $selected_id = null, $skip_bank_accounts = false, $cells = false, $all_option = false, $submit_on_change = false, $all = false, $type_id = false)
 {
-	return ListRenderer::get()->gl_all_accounts_list_cells($label, $name, $selected_id, $skip_bank_accounts, $cells, $all_option, $submit_on_change, $all);
+	return ListRenderer::get()->gl_all_accounts_list_cells($label, $name, $selected_id, $skip_bank_accounts, $cells, $all_option, $submit_on_change, $all, $type_id);
 }
 
-function gl_all_accounts_list_row($label, $name, $selected_id = null, $skip_bank_accounts = false, $cells = false, $all_option = false)
+function gl_all_accounts_list_row($label, $name, $selected_id = null, $skip_bank_accounts = false, $cells = false, $all_option = false, $submit_on_change = false, $all = false, $type_id = false)
 {
-	return ListRenderer::get()->gl_all_accounts_list_row($label, $name, $selected_id, $skip_bank_accounts, $cells, $all_option);
+	return ListRenderer::get()->gl_all_accounts_list_row($label, $name, $selected_id, $skip_bank_accounts, $cells, $all_option, $submit_on_change, $all, $type_id);
 }
 
 function yesno_list($name, $selected_id = null, $name_yes = "", $name_no = "", $submit_on_change = false)
@@ -834,12 +834,12 @@ function quick_entries_list($name, $selected_id = null, $type = null, $submit_on
 	return ListRenderer::get()->quick_entries_list($name, $selected_id, $type, $submit_on_change);
 }
 
-function quick_entries_list_cells($label, $name, $selected_id = null, $type, $submit_on_change = false)
+function quick_entries_list_cells($label, $name, $selected_id, $type, $submit_on_change = false)
 {
 	return ListRenderer::get()->quick_entries_list_cells($label, $name, $selected_id, $type, $submit_on_change);
 }
 
-function quick_entries_list_row($label, $name, $selected_id = null, $type, $submit_on_change = false)
+function quick_entries_list_row($label, $name, $selected_id, $type, $submit_on_change = false)
 {
 	return ListRenderer::get()->quick_entries_list_row($label, $name, $selected_id, $type, $submit_on_change);
 }

@@ -26,20 +26,31 @@ include_once($path_to_root . "/includes/data_checks.inc");
 include_once($path_to_root . "/sales/includes/sales_db.inc");
 
 //----------------------------------------------------------------------------------------------------
-function get_invoice_range($from, $to)
+function get_invoice_range($from, $to, $currency=false)
 {
 	global $SysPrefs;
 
 	$ref = ($SysPrefs->print_invoice_no() == 1 ? "trans_no" : "reference");
 
-	$sql = "SELECT trans.trans_no, trans.reference
-		FROM ".TB_PREF."debtor_trans trans 
-			LEFT JOIN ".TB_PREF."voided voided ON trans.type=voided.type AND trans.trans_no=voided.id
-		WHERE trans.type=".ST_SALESINVOICE
-			." AND ISNULL(voided.id)"
-			." AND trans.reference>=".db_escape(get_reference(ST_SALESINVOICE, $from))
-			." AND trans.reference<=".db_escape(get_reference(ST_SALESINVOICE, $to))
-		." ORDER BY trans.tran_date, trans.$ref";
+	$sql = "SELECT trans.trans_no, trans.reference";
+
+//  if($currency !== false)
+//		$sql .= ", cust.curr_code";
+
+	$sql .= " FROM ".TB_PREF."debtor_trans trans 
+			LEFT JOIN ".TB_PREF."voided voided ON trans.type=voided.type AND trans.trans_no=voided.id";
+
+	if ($currency !== false)
+		$sql .= " LEFT JOIN ".TB_PREF."debtors_master cust ON trans.debtor_no=cust.debtor_no";
+
+	$sql .= " WHERE trans.type=".ST_SALESINVOICE
+		." AND ISNULL(voided.id)"
+ 		." AND trans.trans_no BETWEEN ".db_escape($from)." AND ".db_escape($to);			
+
+	if ($currency !== false)
+		$sql .= " AND cust.curr_code=".db_escape($currency);
+
+	$sql .= " ORDER BY trans.tran_date, trans.$ref";
 
 	return db_query($sql, "Cant retrieve invoice range");
 }
@@ -47,12 +58,18 @@ function get_invoice_range($from, $to)
 print_invoices();
 
 //----------------------------------------------------------------------------------------------------
+// Fetch bank account details by bank name (used for XRPL overrides)
+function get_bank_account_by_name($name) {
+    $sql = "SELECT * FROM ".TB_PREF."bank_accounts WHERE bank_name = ".db_escape($name);
+    $result = db_query($sql, "could not retrieve bank account");
+    $row = db_fetch($result);
+    return $row ? $row : false;
+}
 
+//---------------------------------------------------------------------------------------------------
 function print_invoices()
 {
 	global $path_to_root, $SysPrefs;
-	
-	$show_this_payment = true; // include payments invoiced here in summary
 
 	include_once($path_to_root . "/reporting/includes/pdf_report.inc");
 
@@ -90,7 +107,12 @@ function print_invoices()
 	if ($orientation == 'L')
 		recalculate_cols($cols);
 
-	$range = get_invoice_range($from, $to);
+	$range = Array();
+	if ($currency == ALL_TEXT)
+		$range = get_invoice_range($from, $to);
+	else
+		$range = get_invoice_range($from, $to, $currency);
+
 	while($row = db_fetch($range))
 	{
 			if (!exists_customer_trans(ST_SALESINVOICE, $row['trans_no']))
@@ -101,10 +123,17 @@ function print_invoices()
 			if ($customer && $myrow['debtor_no'] != $customer) {
 				continue;
 			}
-			if ($currency != ALL_TEXT && $myrow['curr_code'] != $currency) {
-				continue;
+//			if ($currency != ALL_TEXT && $myrow['curr_code'] != $currency) {
+//				continue;
+//			}
+
+			if (substr($pay_service, 0, 4) === 'XRPL') {
+// Override: use XUMM XRP bank account for display
+   			 	$baccount = get_bank_account_by_name('XUMM XRP');
+			} else {
+// Default logic
+				$baccount = get_default_bank_account($myrow['curr_code']);
 			}
-			$baccount = get_default_bank_account($myrow['curr_code']);
 			$params['bankaccount'] = $baccount['id'];
 
 			$branch = get_branch($myrow["branch_code"]);
@@ -127,8 +156,11 @@ function print_invoices()
 			// calculate summary start row for later use
 			$summary_start_row = $rep->bottomMargin + (15 * $rep->lineHeight);
 
+			$show_this_payment = $rep->formData['prepaid'] == 'partial'; // include payments invoiced here in summary
+
 			if ($rep->formData['prepaid'])
 			{
+				
 				$result = get_sales_order_invoices($myrow['order_']);
 				$prepayments = array();
 				while($inv = db_fetch($result))
@@ -165,6 +197,11 @@ function print_invoices()
 				$rep->TextCol($c++, $c,	$myrow2['stock_id'], -2);
 				$oldrow = $rep->row;
 				$rep->TextColLines($c++, $c, $myrow2['StockDescription'], -2);
+				if (!empty($SysPrefs->prefs['long_description_invoice']) && !empty($myrow2['StockLongDescription']))
+				{
+					$c--;
+					$rep->TextColLines($c++, $c, $myrow2['StockLongDescription'], -2);
+				}
 				$newrow = $rep->row;
 				$rep->row = $oldrow;
 				if ($Net != 0.0 || !is_service($myrow2['mb_flag']) || !$SysPrefs->no_zero_lines_amount())
@@ -302,7 +339,7 @@ function print_invoices()
 			$rep->Font();
 			if ($email == 1)
 			{
-				$rep->End($email);
+				$rep->End($email, sprintf(_("Invoice %s from %s"), $myrow['reference'], htmlspecialchars_decode(get_company_pref('coy_name'))));
 			}
 	}
 	if ($email == 0)

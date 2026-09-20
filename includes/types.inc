@@ -46,6 +46,11 @@ define('ST_SALESORDER', 30);
 define('ST_SALESQUOTE', 32);
 define('ST_COSTUPDATE', 35);
 define('ST_DIMENSION', 40);
+define('ST_CUSTOMER', 41);
+define('ST_SUPPLIER', 42);
+define('ST_ITEM', 43);
+define('ST_FIXEDASSET', 44);
+define('ST_BANKACCOUNT', 45);
 
 // Don't include these defines in the $systypes_array.
 // They are used for documents only.
@@ -130,7 +135,7 @@ function payment_person_name($type, $person_id, $full=true) {
 			return ($full ? $payment_person_types[$type] . " ":"") . $qe["description"];
 		case PT_WORKORDER :
 			global $wo_cost_types;
-			return get_trans_view_str(ST_WORKORDER, $person_id, _('Work Order').' '.$person_id);
+			return (!$full ? _('Work Order').' '.$person_id : get_trans_view_str(ST_WORKORDER, $person_id, _('Work Order').' '.$person_id));
 		case PT_CUSTOMER :
 			return ($full ?$payment_person_types[$type] . " ":"") . sprintf("[%05s] %s", $person_id, get_customer_name($person_id));
 		case PT_SUPPLIER :

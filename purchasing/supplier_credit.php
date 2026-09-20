@@ -28,8 +28,11 @@ if (user_use_date_picker())
 
 //----------------------------------------------------------------------------------------
 
-if (isset($_GET['ModifyCredit']))
-	check_is_editable(ST_SUPPINVOICE, $_GET['ModifyCredit']);
+if (isset($_GET['ModifyCredit'])) {
+    check_is_editable(ST_SUPPCREDIT, $_GET['ModifyCredit']);
+    $_SESSION['page_title'] = sprintf( _("Modifying Supplier Credit # %d"), $_GET['ModifyCredit']);
+    $_SESSION['supp_trans'] = new supp_trans(ST_SUPPCREDIT, $_GET['ModifyCredit']);
+}
 
 //---------------------------------------------------------------------------------------------------
 
@@ -51,6 +54,7 @@ if (isset($_GET['New']))
 		$_SESSION['supp_trans']->trans_type = ST_SUPPCREDIT;
 		$_SESSION['supp_trans']->trans_no = 0;
 		$_SESSION['supp_trans']->supp_reference = '';
+		$_SESSION['supp_trans']->reference = '';
 		$help_context = "Supplier Credit Note";
 		$_SESSION['page_title'] = _("Supplier Credit Note");
 
@@ -162,6 +166,13 @@ function check_data()
 {
 	global $SysPrefs;
 
+	if (!get_post('supplier_id')) 
+	{
+		display_error(_("There is no supplier selected."));
+		set_focus('supplier_id');
+		return false;
+	} 
+
 	if (!$_SESSION['supp_trans']->is_valid_trans_to_post())
 	{
 		display_error(_("The credit note cannot be processed because the there are no items or values on the invoice.  Credit notes are expected to have a charge."));
@@ -236,10 +247,7 @@ function handle_commit_credit_note()
 	if (!check_data())
 		return;
 
-	if (isset($_POST['invoice_no']))
-		$invoice_no = add_supp_invoice($_SESSION['supp_trans'], $_POST['invoice_no']);
-	else
-		$invoice_no = add_supp_invoice($_SESSION['supp_trans']);
+	$invoice_no = add_supp_invoice($_SESSION['supp_trans']);
 
     $_SESSION['supp_trans']->clear_items();
     unset($_SESSION['supp_trans']);
@@ -282,8 +290,7 @@ function commit_item_data($n)
     		$_POST['po_detail_item'.$n], $_POST['item_code'.$n],
     		$_POST['item_description'.$n], $_POST['qty_recd'.$n],
     		$_POST['prev_quantity_inv'.$n], input_num('This_QuantityCredited'.$n),
-    		$_POST['order_price'.$n], input_num('ChgPrice'.$n),
-    		$_POST['std_cost_unit'.$n], "");
+    		$_POST['order_price'.$n], input_num('ChgPrice'.$n));
 		reset_tax_input();
 	}
 }

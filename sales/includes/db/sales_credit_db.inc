@@ -114,6 +114,8 @@ function write_credit_note(&$credit_note, $write_off_acc)
 		$line_tax = get_full_price_for_item($credit_line->stock_id, $credit_line->price,
 		  0, $credit_note->tax_included, $credit_note->tax_group_array) - $line_taxfree_price;
 
+		$credit_line->standard_cost = get_unit_cost($credit_line->stock_id); 
+		
 		write_customer_trans_detail_item(ST_CUSTCREDIT, $credit_no, $credit_line->stock_id,
 			$credit_line->item_description, $credit_line->qty_dispatched,
 			$credit_line->line_price(), $line_tax, $credit_line->discount_percent,
@@ -132,14 +134,14 @@ function write_credit_note(&$credit_note, $write_off_acc)
 
 	if (($credit_note_total + $credit_note->freight_cost) != 0) {
 
-		$total += add_gl_trans_customer(ST_CUSTCREDIT, $credit_no, $credit_date, $branch_data["receivables_account"], 0, 0,
+		$total += add_gl_trans_customer(ST_CUSTCREDIT, $credit_no, $credit_date, $branch_data["receivables_account"], $credit_note->dimension_id, $credit_note->dimension2_id,
 			-($credit_note_total + $credit_note->freight_cost + $items_added_tax + $freight_added_tax),
 			$credit_note->customer_id,
 			"The total debtor GL posting for the credit note could not be inserted");
 	}
 
 	if ($credit_note->freight_cost != 0) {
-		$total += add_gl_trans_customer(ST_CUSTCREDIT, $credit_no, $credit_date, $company_data["freight_act"], 0, 0,
+		$total += add_gl_trans_customer(ST_CUSTCREDIT, $credit_no, $credit_date, $company_data["freight_act"], $credit_note->dimension_id, $credit_note->dimension2_id,
 			$credit_note->get_tax_free_shipping(), $credit_note->customer_id,
 			"The freight GL posting for this credit note could not be inserted");
 	}
@@ -152,8 +154,9 @@ function write_credit_note(&$credit_note, $write_off_acc)
 				$taxitem['rate'], $credit_note->tax_included, $taxitem['Value'],
 				$taxitem['Net'], $ex_rate,
 				$credit_note->document_date, $credit_note->reference, TR_OUTPUT);
-
-			$total += add_gl_trans_customer(ST_CUSTCREDIT, $credit_no, $credit_date, $taxitem['sales_gl_code'], 0, 0,
+            // sales_gl_code is not set for taxexempt
+            if (isset($taxitem['sales_gl_code']))
+				$total += add_gl_trans_customer(ST_CUSTCREDIT, $credit_no, $credit_date, $taxitem['sales_gl_code'], $credit_note->dimension_id, $credit_note->dimension2_id,
 				$taxitem['Value'], $credit_note->customer_id,
 				"A tax GL posting for this credit note could not be inserted");
 		}
@@ -209,7 +212,8 @@ function add_gl_trans_credit_costs($order, $order_line, $credit_no, $date_,
 	$total = 0;
 	/* insert gl_trans to credit stock and debit cost of sales at standard cost*/
 	$unit_cost = get_unit_cost($order_line->stock_id);
-	if ($unit_cost != 0) {
+
+	if ($stock_gl_codes['mb_flag'] != 'D' && $unit_cost != 0) {
 		/*first the cost of sales entry*/
 
 		$total += add_gl_trans_std_cost(ST_CUSTCREDIT, $credit_no, $date_, $stock_gl_codes["cogs_account"],
@@ -225,7 +229,7 @@ function add_gl_trans_credit_costs($order, $order_line, $credit_no, $date_,
 			$stock_entry_account = $stock_gl_code["inventory_account"];
 		}
 
-		$total += add_gl_trans_std_cost(ST_CUSTCREDIT, $credit_no, $date_, $stock_entry_account, 0, 0,
+		$total += add_gl_trans_std_cost(ST_CUSTCREDIT, $credit_no, $date_, $stock_entry_account, $dim, $dim2,
 			"", ($unit_cost * $order_line->qty_dispatched),
 			PT_CUSTOMER, $order->customer_id,
 			"The stock side (or write off) of the cost of sales GL posting could not be inserted");

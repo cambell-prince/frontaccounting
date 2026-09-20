@@ -942,6 +942,7 @@ class Spreadsheet_Excel_Writer_BIFFwriter
     * @see _addContinue()
     */
     var $_limit;
+    var $_offset;
 
     /**
     * Constructor
@@ -1462,6 +1463,10 @@ class Spreadsheet_Excel_Writer_Format
     */
     var $_right_color;
 
+    // Dynamic members must be here (php 8.2)
+    var $_BIFF_version;
+    var $_diag;
+    var $_diag_color;
     /**
     * Constructor
     *
@@ -2381,6 +2386,9 @@ class Spreadsheet_Excel_Writer_Parser
     */
     var $_BIFF_version;
 
+    // The Excel ptg indices. Dynamic members must be here (php 8.2)
+    var $ptg;
+	var $_functions;
     /**
     * The class constructor
     *
@@ -3277,7 +3285,7 @@ class Spreadsheet_Excel_Writer_Parser
         $col    = 0;
         $col_ref_length = strlen($col_ref);
         for ($i = 0; $i < $col_ref_length; $i++) {
-            $col += (ord($col_ref{$i}) - ord('A') + 1) * pow(26, $expn);
+            $col += (ord($col_ref[$i]) - ord('A') + 1) * pow(26, $expn);
             $expn--;
         }
 
@@ -3299,20 +3307,20 @@ class Spreadsheet_Excel_Writer_Parser
         $formula_length = strlen($this->_formula);
         // eat up white spaces
         if ($i < $formula_length) {
-            while ($this->_formula{$i} == " ") {
+            while ($this->_formula[$i] == " ") {
                 $i++;
             }
 
             if ($i < ($formula_length - 1)) {
-                $this->_lookahead = $this->_formula{$i+1};
+                $this->_lookahead = $this->_formula[$i+1];
             }
             $token = '';
         }
 
         while ($i < $formula_length) {
-            $token .= $this->_formula{$i};
+            $token .= $this->_formula[$i];
             if ($i < ($formula_length - 1)) {
-                $this->_lookahead = $this->_formula{$i+1};
+                $this->_lookahead = $this->_formula[$i+1];
             } else {
                 $this->_lookahead = '';
             }
@@ -3327,7 +3335,7 @@ class Spreadsheet_Excel_Writer_Parser
             }
 
             if ($i < ($formula_length - 2)) {
-                $this->_lookahead = $this->_formula{$i+2};
+                $this->_lookahead = $this->_formula[$i+2];
             } else { // if we run out of characters _lookahead becomes empty
                 $this->_lookahead = '';
             }
@@ -3475,7 +3483,7 @@ class Spreadsheet_Excel_Writer_Parser
     {
         $this->_current_char = 0;
         $this->_formula      = $formula;
-        $this->_lookahead    = $formula{1};
+        $this->_lookahead    = $formula[1];
         $this->_advance();
         $this->_parse_tree   = $this->_condition();
     }
@@ -4131,6 +4139,24 @@ class Spreadsheet_Excel_Writer_Worksheet extends Spreadsheet_Excel_Writer_BIFFwr
     * @var string
     */
     var $_input_encoding;
+    // Dynamic members must be here (php8.2)
+    var $activesheet;
+    var $firstsheet;
+    var $title_colmax;
+    var $_print_gridlines;
+    var $_screen_gridlines;
+    var $_print_headers;
+    var $_hbreaks;
+    var $_vbreaks;
+    var $_protect;
+    var $_password;
+    var $col_sizes;
+    var $_row_sizes;
+    var $_zoom;
+    var $_print_scale;
+    var $_rtl;
+    var $_dv;
+
 
     /**
     * Constructor
@@ -6653,7 +6679,7 @@ class Spreadsheet_Excel_Writer_Worksheet extends Spreadsheet_Excel_Writer_BIFFwr
         $colcount = count($this->_colinfo);
         for ($i = 0; $i < $colcount; $i++) {
            // Skip cols without outline level info.
-           if (count($col_level) >= 6) {
+           if (count_array($col_level) >= 6) {
               $col_level = max($this->_colinfo[$i][5], $col_level);
            }
         }
@@ -7406,6 +7432,12 @@ class Spreadsheet_Excel_Writer_Workbook extends Spreadsheet_Excel_Writer_BIFFwri
     */
     var $_string_sizeinfo_size;
 
+    // Dynamic members must be here (php8.2)
+    var $_string_sizeinfo;
+    var $_str_total;
+    var $_str_unique;
+    var $_str_table;
+    //var $_offset;
     /**
     * Class constructor
     *
@@ -7765,7 +7797,7 @@ class Spreadsheet_Excel_Writer_Workbook extends Spreadsheet_Excel_Writer_BIFFwri
 
         // Add BOUNDSHEET records
         for ($i = 0; $i < $total_worksheets; $i++) {
-            $this->_storeBoundsheet($this->_worksheets[$i]->name,$this->_worksheets[$i]->offset);
+            $this->_storeBoundsheet($this->_worksheets[$i]->name,$this->_worksheets[$i]->_offset);
         }
 
         if ($this->_country_code != -1) {
@@ -7865,7 +7897,7 @@ class Spreadsheet_Excel_Writer_Workbook extends Spreadsheet_Excel_Writer_BIFFwri
         $offset += $EOF;
 
         for ($i = 0; $i < $total_worksheets; $i++) {
-            $this->_worksheets[$i]->offset = $offset;
+            $this->_worksheets[$i]->_offset = $offset;
             $offset += $this->_worksheets[$i]->_datasize;
         }
         $this->_biffsize = $offset;

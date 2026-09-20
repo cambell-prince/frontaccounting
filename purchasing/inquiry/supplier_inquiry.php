@@ -51,15 +51,18 @@ function display_supplier_summary($supplier_record)
     	$pastdue1, $pastdue2, _("Total Balance"));
 
 	table_header($th);
-    start_row();
-	label_cell($supplier_record["curr_code"]);
-    label_cell($supplier_record["terms"]);
-    amount_cell($supplier_record["Balance"] - $supplier_record["Due"]);
-    amount_cell($supplier_record["Due"] - $supplier_record["Overdue1"]);
-    amount_cell($supplier_record["Overdue1"] - $supplier_record["Overdue2"]);
-    amount_cell($supplier_record["Overdue2"]);
-    amount_cell($supplier_record["Balance"]);
-    end_row();
+	if ($supplier_record != false)
+	{
+	    start_row();
+		label_cell($supplier_record["curr_code"]);
+	    label_cell($supplier_record["terms"]);
+	    amount_cell($supplier_record["Balance"] - $supplier_record["Due"]);
+	    amount_cell($supplier_record["Due"] - $supplier_record["Overdue1"]);
+	    amount_cell($supplier_record["Overdue1"] - $supplier_record["Overdue2"]);
+	    amount_cell($supplier_record["Overdue2"]);
+	    amount_cell($supplier_record["Balance"]);
+	    end_row();
+	}
     end_table(1);
 }
 //------------------------------------------------------------------------------------------------
@@ -81,6 +84,8 @@ function due_date($row)
 
 function gl_view($row)
 {
+	if ($row['type'] == ST_SUPPRECEIVE && get_voided_entry(ST_SUPPRECEIVE, $row['trans_no']))
+		return set_icon(ICON_REMOVE, _("Voided."));
 	return get_gl_view_str($row["type"], $row["trans_no"]);
 }
 
@@ -153,9 +158,10 @@ set_global_supplier($_POST['supplier_id']);
 //------------------------------------------------------------------------------------------------
 
 div_start('totals_tbl');
+
 if ($_POST['supplier_id'] != "" && $_POST['supplier_id'] != ALL_TEXT)
 {
-	$supplier_record = get_supplier_details(get_post('supplier_id'), get_post('TransToDate'));
+	$supplier_record = get_supplier_details(get_post('supplier_id'), get_post('TransToDate'), true);
     display_supplier_summary($supplier_record);
 }
 div_end();
@@ -181,9 +187,9 @@ $cols = array(
 			_("Amount") => array('align'=>'right', 'fun'=>'fmt_amount'), 
 			_("Balance") => array('align'=>'right', 'type'=>'amount'),
 			array('insert'=>true, 'fun'=>'gl_view'),
+			array('insert'=>true, 'fun'=>'edit_link'),
 			array('insert'=>true, 'fun'=>'credit_link'),
-			array('insert'=>true, 'fun'=>'prt_link'),
-			array('insert'=>true, 'fun'=>'edit_link')
+			array('insert'=>true, 'fun'=>'prt_link')
 			);
 
 if ($_POST['supplier_id'] != ALL_TEXT)

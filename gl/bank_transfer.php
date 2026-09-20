@@ -86,6 +86,8 @@ function gl_payment_controls($trans_no)
 			$_POST['ToBankAccount'] = $to_trans['bank_act'];
 			$_POST['target_amount'] = price_format($to_trans['amount']);
 			$_POST['amount'] = price_format(-$from_trans['amount']);
+			$_POST['dimension_id'] = $to_trans['dimension_id'];
+			$_POST['dimension2_id'] = $to_trans['dimension2_id'];
 		}
 	}
 
@@ -109,6 +111,12 @@ function gl_payment_controls($trans_no)
     date_row(_("Transfer Date:"), 'DatePaid', '', true, 0, 0, 0, null, true);
 
 	ref_row(_("Reference:"), 'ref', '', null, false, ST_BANKTRANSFER, array('date' => get_post('DatePaid')));
+	$dim = get_company_pref('use_dimension');
+	if ($dim > 0)
+		dimensions_list_row(_("Dimension").":", 'dimension_id', 
+			null, true, ' ', false, 1, false);
+	else
+		hidden('dimension_id', 0);
 
 	table_section(2);
 
@@ -126,6 +134,11 @@ function gl_payment_controls($trans_no)
 		amount_row(_("Amount:"), 'amount');
 		amount_row(_("Bank Charge:"), 'charge');
 	}
+	if ($dim > 1)
+		dimensions_list_row(_("Dimension")." 2:", 'dimension2_id', 
+			null, true, ' ', false, 2, false);
+	else
+		hidden('dimension2_id', 0);
 
     textarea_row(_("Memo:"), 'memo_', null, 40,4);
 
@@ -176,6 +189,7 @@ function check_valid_entries($trans_no)
 
 	$amnt_tr = input_num('charge') + input_num('amount');
 
+	$problemTransaction = null;
 	if ($trans_no) {
 		$problemTransaction = check_bank_transfer( $trans_no, $_POST['FromBankAccount'], $_POST['ToBankAccount'], $_POST['DatePaid'],
 			$amnt_tr, input_num('target_amount', $amnt_tr));
@@ -265,10 +279,12 @@ function bank_transfer_handle_submit()
 {
 	$trans_no = array_key_exists('_trans_no', $_POST) ?  $_POST['_trans_no'] : null;
 	if ($trans_no) {
-		$trans_no = update_bank_transfer($trans_no, $_POST['FromBankAccount'], $_POST['ToBankAccount'], $_POST['DatePaid'], input_num('amount'), $_POST['ref'], $_POST['memo_'], input_num('charge'), input_num('target_amount'));
+		$trans_no = update_bank_transfer($trans_no, $_POST['FromBankAccount'], $_POST['ToBankAccount'], $_POST['DatePaid'],	input_num('amount'), 
+			$_POST['ref'], $_POST['memo_'], $_POST['dimension_id'], $_POST['dimension2_id'], input_num('charge'), input_num('target_amount'));
 	} else {
 		new_doc_date($_POST['DatePaid']);
-		$trans_no = add_bank_transfer($_POST['FromBankAccount'], $_POST['ToBankAccount'], $_POST['DatePaid'], input_num('amount'), $_POST['ref'], $_POST['memo_'], input_num('charge'), input_num('target_amount'));
+		$trans_no = add_bank_transfer($_POST['FromBankAccount'], $_POST['ToBankAccount'], $_POST['DatePaid'], input_num('amount'), $_POST['ref'], 
+			$_POST['memo_'], $_POST['dimension_id'], $_POST['dimension2_id'], input_num('charge'), input_num('target_amount'));
 	}
 
 	meta_forward($_SERVER['PHP_SELF'], "AddedID=$trans_no");

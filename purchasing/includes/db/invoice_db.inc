@@ -16,11 +16,10 @@ include_once($path_to_root . "/admin/db/attachments_db.inc");
 
 function read_supplier_details_to_trans(&$supp_trans, $supplier_id)
 {
-	$sql = "SELECT supp.supp_name, terms.terms, terms.days_before_due,
+	$sql = "SELECT supp.supp_name, terms.terms, terms.days_before_due, supp.dimension_id, supp.dimension2_id,
 		terms.day_in_following_month, supp.tax_included,
 		supp.tax_group_id, tax_group.name AS tax_group_name,
-		supp.credit_limit - Sum(IFNULL(IF(trans.type=".ST_SUPPCREDIT.", -1, 1) 
-			* (ov_amount + ov_gst + ov_discount),0)) as cur_credit
+		supp.credit_limit - Sum((ov_amount + ov_gst + ov_discount)) as cur_credit, curr_code
 		FROM ".TB_PREF."suppliers supp LEFT JOIN "
 			.TB_PREF."supp_trans trans ON supp.supplier_id = trans.supplier_id, "
 			.TB_PREF."payment_terms terms, "
@@ -40,10 +39,7 @@ function read_supplier_details_to_trans(&$supp_trans, $supplier_id)
 		if (!is_date_in_fiscalyear($supp_trans->tran_date))
 			$supp_trans->tran_date = end_fiscalyear();
 	}
-	if ($supp_trans->supplier_id != $supplier_id)
-	    get_duedate_from_terms($supp_trans);
 
-    $supp_trans->supplier_id = $supplier_id;
     $supp_trans->tax_included = $myrow['tax_included'];
     $supp_trans->supplier_name = $myrow['supp_name'];
 	$supp_trans->terms = array( 
@@ -51,11 +47,19 @@ function read_supplier_details_to_trans(&$supp_trans, $supplier_id)
 		'days_before_due' => $myrow['days_before_due'], 
 		'day_in_following_month' => $myrow['day_in_following_month'] );
 
+	if ($supp_trans->supplier_id != $supplier_id)
+	    get_duedate_from_terms($supp_trans);
+
+    $supp_trans->supplier_id = $supplier_id;
+
 	$supp_trans->credit = $myrow['cur_credit'];
 
 	$supp_trans->tax_description = $myrow['tax_group_name'];
 	$supp_trans->tax_group_id = $myrow['tax_group_id'];
-
+	$supp_trans->dimension = $myrow['dimension_id'];
+	$supp_trans->dimension2 = $myrow['dimension2_id'];
+	$supp_trans->currency = $myrow['curr_code'];
+ 
 }
 
 //-------------------------------------------------------------------------------------------------
@@ -70,10 +74,10 @@ function update_supp_received_items_for_invoice($id, $po_detail_item, $qty_invoi
 		$sql = "SELECT act_price, unit_price FROM ".TB_PREF."purch_order_details WHERE
 			po_detail_item = ".db_escape($po_detail_item);
 		$result = db_query($sql, "The old actual price of the purchase order line could not be retrieved");
-		$row = db_fetch_row($result);
-		$ret = $row[0];
+		$row = db_fetch($result);
+		$ret = $row['act_price'];
 
-		$unit_price = $row[1]; //Added by Rasmus
+		$unit_price = $row['unit_price']; //Added by Rasmus
 
 		$sql = "SELECT delivery_date 
 			FROM ".TB_PREF."grn_batch grn,"
@@ -81,8 +85,8 @@ function update_supp_received_items_for_invoice($id, $po_detail_item, $qty_invoi
 			WHERE
 				grn.id = line.grn_batch_id AND line.id=".db_escape($id);
 		$result = db_query($sql, "The old delivery date from the received record cout not be retrieved");
-		$row = db_fetch_row($result);
-		$date = $row[0];
+		$row = db_fetch($result);
+		$date = $row['delivery_date'];
 	}
 	else
 	{
@@ -120,7 +124,6 @@ function get_diff_in_home_currency($supplier, $old_date, $date, $amount1, $amoun
 	return $diff;
 }
 //----------------------------------------------------------------------------------------
-
 function add_supp_invoice(&$supp_trans)
 {
 	global $Refs;
@@ -129,6 +132,10 @@ function add_supp_invoice(&$supp_trans)
 	$trans_no = $supp_trans->trans_no;
 	$trans_type = $supp_trans->trans_type;
 	$supplier = get_supplier($supp_trans->supplier_id);
+    $dim = !empty($supp_trans->dimension) ? $supp_trans->dimension :
+        ($supplier['dimension_id'] ? $supplier['dimension_id'] : 0);
+    $dim2 = !empty($supp_trans->dimension2) ? $supp_trans->dimension2 :
+        ($supplier['dimension2_id'] ? $supplier['dimension2_id'] : 0);
 
 	begin_transaction();
 	hook_db_prewrite($supp_trans, $trans_type);
@@ -136,12 +143,12 @@ function add_supp_invoice(&$supp_trans)
     $taxes = $supp_trans->get_taxes($supp_trans->tax_group_id);
 	if ($trans_no) {
 		$allocs = get_payments_for($trans_no, $trans_type, $supp_trans->supplier_id); // save allocations
-		void_transaction($trans_type, $trans_no, Today(), _("Document reentered."));
+		void_transaction($trans_type, $trans_no, $supp_trans->tran_date, _("Document reentered."));
 		$Refs->restore_last($trans_type, $trans_no);
 	} else
 		$allocs = get_po_prepayments($supp_trans);
 
-	add_new_exchange_rate($supplier['curr_code'], $supp_trans->tran_date, $supp_trans->ex_rate);
+	add_new_exchange_rate($supp_trans->currency, $supp_trans->tran_date, $supp_trans->ex_rate);
 
     foreach ($taxes as $n => $taxitem)
     {
@@ -158,7 +165,6 @@ function add_supp_invoice(&$supp_trans)
 	    foreach ($taxes as $n => $taxitem)
 			$item_added_tax += isset($taxitem['Override']) ? $taxitem['Override'] : round2($taxitem['Value'], user_price_dec());
 	}
-
 	if ($trans_type == ST_SUPPCREDIT)
 	{
 		// let's negate everything because it's a credit note
@@ -169,7 +175,7 @@ function add_supp_invoice(&$supp_trans)
 	}
 
     $date_ = $supp_trans->tran_date;
-	$ex_rate = get_exchange_rate_from_home_currency($supplier['curr_code'], $date_);
+	$ex_rate = get_exchange_rate_from_home_currency($supp_trans->currency, $date_);
 
     /*First insert the invoice into the supp_trans table*/
 	$invoice_id = write_supp_trans($trans_type, 0, $supp_trans->supplier_id, $date_, $supp_trans->due_date,
@@ -207,7 +213,7 @@ function add_supp_invoice(&$supp_trans)
 				if ($trans_type == ST_SUPPCREDIT)
 					$taxitem['Value'] = -$taxitem['Value'];
 				$total += add_gl_trans_supplier($trans_type, $invoice_id, $date_,
-					$taxitem['purchasing_gl_code'], 0, 0, $taxitem['Value'],
+					$taxitem['purchasing_gl_code'], $dim, $dim2, $taxitem['Value'],
 					$supp_trans->supplier_id,
 					"A general ledger transaction for the tax amount could not be added");
 			}
@@ -217,7 +223,7 @@ function add_supp_invoice(&$supp_trans)
 		$net_diff = -$net_diff;
 
     /* Now the AP account */
-    $total += add_gl_trans_supplier($trans_type, $invoice_id, $date_, $supplier["payable_account"], 0, 0,
+    $total += add_gl_trans_supplier($trans_type, $invoice_id, $date_, $supplier["payable_account"], $dim, $dim2,
 		-($invoice_items_total +  $item_added_tax + $supp_trans->ov_discount),
 		$supp_trans->supplier_id,
 		"The general ledger transaction for the control total could not be added");
@@ -250,11 +256,13 @@ function add_supp_invoice(&$supp_trans)
     $clearing_act = get_company_pref('grn_clearing_act');
     foreach ($supp_trans->grn_items as $line_no => $entered_grn)
     {
-
+    	// moved this line up to calculate the taxfree price.
+    	$taxfree_line = get_tax_free_price_for_item($entered_grn->item_code, $entered_grn->this_quantity_inv * $entered_grn->chg_price, 
+			  $supp_trans->tax_group_id, $supp_trans->tax_included) - $net_diff; $net_diff = 0;
     	if ($trans_type == ST_SUPPCREDIT)
     	{
 			$entered_grn->this_quantity_inv = -$entered_grn->this_quantity_inv;
-			set_grn_item_credited($entered_grn, $supp_trans->supplier_id, $invoice_id, $date_);
+			set_grn_item_credited($entered_grn, $supp_trans->supplier_id, $invoice_id, $date_, $taxfree_line);
     	}
 
 		// For tax included pricelist the net price is calculated down from tax_included price.
@@ -264,11 +272,9 @@ function add_supp_invoice(&$supp_trans)
 		// taxes and sales accounts, so we add net_diff just to first posted net value. This is _ugly_hack_
 		// which save us from rewriting whole routine, and works right only for small tax differences.
 
-		$taxfree_line = get_tax_free_price_for_item($entered_grn->item_code, $entered_grn->this_quantity_inv * $entered_grn->chg_price, 
-			  $supp_trans->tax_group_id, $supp_trans->tax_included) - $net_diff; $net_diff = 0;
-
+		
 		$line_tax = get_full_price_for_item($entered_grn->item_code,
-			$entered_grn->this_quantity_inv * $entered_grn->chg_price, 0, $supp_trans->tax_included) - $taxfree_line;
+			$entered_grn->this_quantity_inv * $entered_grn->chg_price, $supp_trans->tax_group_id, $supp_trans->tax_included) - $taxfree_line;
 
 		$stock_gl_code = get_stock_gl_code($entered_grn->item_code);
 
@@ -303,7 +309,7 @@ function add_supp_invoice(&$supp_trans)
 					$dim, $dim2, $taxfree_line, $supp_trans->supplier_id);
 			else
 			{
-				$ex_rate = get_exchange_rate_from_home_currency($supplier['curr_code'], $old_date);
+				$ex_rate = get_exchange_rate_from_home_currency($supp_trans->currency, $old_date);
 				$old_value = get_tax_free_price_for_item($entered_grn->item_code, $entered_grn->this_quantity_inv * $old_price, 
 					  $supp_trans->tax_group_id, $supp_trans->tax_included);
 
@@ -335,7 +341,6 @@ function add_supp_invoice(&$supp_trans)
 						$ref = $Refs->get_next(ST_JOURNAL, null, $date_);
 						add_journal(ST_JOURNAL, $id, $diff, $date_, get_company_currency(), $ref);
 						$stock_id = $entered_grn->item_code;
-						$stock_gl_code = get_stock_gl_code($stock_id);
 						$memo = _("Supplier invoice adjustment for zero inventory of ").$stock_id." "._("Invoice")." ".$supp_trans->reference;
 						//Reverse the inventory effect if $qoh <=0
 						add_gl_trans_std_cost(ST_JOURNAL, $id, $date_, 
@@ -367,10 +372,10 @@ function add_supp_invoice(&$supp_trans)
 
 	$Refs->save($trans_type, $invoice_id, $supp_trans->reference);
 
-	if (count($supp_trans->src_docs) == 1)
+	if ($trans_type==ST_SUPPCREDIT && count($supp_trans->src_docs) == 1) // for credit issued to single invoice autoallocate amount
 	{
 		$invoice_no = key($supp_trans->src_docs);
-		$invoice_alloc_balance = get_supp_trans_allocation_balance(ST_SUPPINVOICE, $supp_trans->src_docs);
+		$invoice_alloc_balance = get_supp_trans_allocation_balance(ST_SUPPINVOICE, $invoice_no);
 		if ($invoice_alloc_balance > 0) 
 		{ 	//the invoice is not already fully allocated 
 
@@ -387,7 +392,7 @@ function add_supp_invoice(&$supp_trans)
 				update_supp_trans_allocation(ST_SUPPINVOICE, $invoice_no, $supp_trans->supplier_id);
 				update_supp_trans_allocation(ST_SUPPCREDIT, $invoice_id, $supp_trans->supplier_id);
 
-				exchange_variation(ST_SUPPCREDIT, $invoice_id, ST_SUPPINVOICE, $supp_trans->src_docs, $date_,
+				exchange_variation(ST_SUPPCREDIT, $invoice_id, ST_SUPPINVOICE, $invoice_no, $date_,
 					$allocate_amount, PT_SUPPLIER);
 			}
 		}
@@ -447,7 +452,7 @@ function get_tax_overrides($trans_type, $trans_no)
 
 function read_supp_invoice($trans_no, $trans_type, &$supp_trans)
 {
-	$sql = "SELECT trans.*, supp_name 
+	$sql = "SELECT trans.*, supp_name, dimension_id, dimension2_id, curr_code
 		FROM ".TB_PREF."supp_trans trans,"
 			.TB_PREF."suppliers sup
 		WHERE trans_no = ".db_escape($trans_no)." AND type = ".db_escape($trans_type)."
@@ -470,6 +475,9 @@ function read_supp_invoice($trans_no, $trans_type, &$supp_trans)
 		$supp_trans->ov_discount = $trans_row["ov_discount"];
 		$supp_trans->ov_gst = $trans_row["ov_gst"];
 		$supp_trans->tax_included = $trans_row["tax_included"];
+		$supp_trans->dimension = $trans_row["dimension_id"];
+		$supp_trans->dimension2 = $trans_row["dimension2_id"];
+		$supp_trans->currency = $trans_row["curr_code"];
 
 		$id = $trans_row["trans_no"];
 
@@ -486,8 +494,8 @@ function read_supp_invoice($trans_no, $trans_type, &$supp_trans)
              		$supp_trans->add_grn_to_trans($details_row["grn_item_id"], $details_row["po_detail_item_id"], $details_row["stock_id"],
            				$details_row["description"], 
            				$details_row['qty_recd'],
-           				$details_row['quantity_inv']-$details_row["quantity"],
-           				$details_row["quantity"], 0, $details_row["FullUnitPrice"],
+           				$details_row['quantity_inv'],
+           				($trans_type == ST_SUPPCREDIT ? -1 : 1) * $details_row["quantity"], 0, $details_row["FullUnitPrice"], // SUPPCREDIT quantities are stored negative in database
            				0, 0);
              	}
              	else
@@ -609,11 +617,11 @@ function void_supp_invoice($type, $type_no)
 						//Reverse the inventory effect if $qoh <=0
 						add_gl_trans_std_cost(ST_JOURNAL, $id, $old_date, 
 							$stock_gl_code["inventory_account"],
-							$dim, $dim2, $memo, $details_row["quantity"] * $diff);
+							$details_row['dimension_id'], $details_row['dimension2_id'], $memo, $details_row["quantity"] * $diff);
 						//GL Posting to inventory adjustment account
 						add_gl_trans_std_cost(ST_JOURNAL, $id, $old_date, 
 							$stock_gl_code["adjustment_account"],
-							$dim, $dim2, $memo, -$details_row["quantity"] * $diff);
+							$details_row['dimension_id'], $details_row['dimension2_id'], $memo, -$details_row["quantity"] * $diff);
 						
 						add_audit_trail(ST_JOURNAL, $id, $old_date);
 						add_comments(ST_JOURNAL, $id, $old_date, $memo);

@@ -235,7 +235,7 @@ elseif (isset($_POST['db_test'])) {
 			'host' => $_POST['host'],
 			'port' => $_POST['port'],
 			'dbuser' => $_POST['dbuser'],
-			'dbpassword' => $_POST['dbpassword'],
+			'dbpassword' => @html_entity_decode($_POST['dbpassword'], ENT_QUOTES, $_SESSION['language']->encoding=='iso-8859-2' ? 'ISO-8859-1' : $_SESSION['language']->encoding),
 			'dbname' => $_POST['dbname'],
 			'tbpref' => $_POST['tbpref'] ? '0_' : '',
 			'sel_langs' => check_value('sel_langs'),
@@ -352,12 +352,13 @@ start_form();
 			text_row_ex(_("Server Port:"), 'port', 30, 60);
 			text_row_ex(_("Database Name:"), 'dbname', 30);
 			text_row_ex(_("Database User:"), 'dbuser', 30);
-			text_row_ex(_("Database Password:"), 'dbpassword', 30);
+			password_row(_("Database Password:"), 'dbpassword', '');
 			collations_list_row(_("Database Collation:"), 'collation');
 			yesno_list_row(_("Use '0_' Table Prefix:"), 'tbpref', 1, _('Yes'), _('No'), false);
 			check_row(_("Install Additional Language Packs from FA Repository:"), 'sel_langs');
 			check_row(_("Install Additional COAs from FA Repository:"), 'sel_coas');
 			end_table(1);
+			display_note(_("Use database user/password with permissions to create new database, or use proper credentials for previously created empty database."));
 			display_note(_("Select collation you want to use. If you are unsure or you will use various languages, select unicode collation."));
 			display_note(_("Use table prefix if you share selected database for more than one FA company using the same collation."));
 			display_note(_("Do not select additional langs nor COAs if you have no working internet connection right now. You can install them later."));

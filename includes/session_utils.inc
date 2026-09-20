@@ -131,15 +131,13 @@ function kill_login()
 function login_fail()
 {
 	global $path_to_root;
-	
+
 	header("HTTP/1.1 401 Authorization Required");
 	echo "<center><br><br><font size='5' color='red'><b>" . _("Incorrect Password") . "<b></font><br><br>";
 	echo "<b>" . _("The user and password combination is not valid for the system.") . "<b><br><br>";
-
 	echo _("If you are not an authorized user, please contact your system administrator to obtain an account to enable you to use the system.");
 	echo "<br><a href='$path_to_root/index.php'>" . _("Try again") . "</a>";
 	echo "</center>";
-
 	kill_login();
 	die();
 }
@@ -179,6 +177,7 @@ function check_faillog()
 
 	$user = $_SESSION["wa_current_user"]->user;
 
+	$_SESSION["wa_current_user"]->login_attempt++;
 	if (@$SysPrefs->login_delay && (@$login_faillog[$user][$_SERVER['REMOTE_ADDR']] >= @$SysPrefs->login_max_attempts) && (time() < $login_faillog[$user]['last'] + $SysPrefs->login_delay))
 		return true;
 
@@ -227,9 +226,9 @@ function write_login_filelog($login, $result)
 	$msg .= "*/\n";
 	$msg .= "\$login_faillog = " .var_export($login_faillog, true). ";\n";
 
-	$filename = $path_to_root."/tmp/faillog.php";
+	$filename = VARLIB_PATH."/faillog.php";
 
-	if ((!file_exists($filename) && is_writable($path_to_root.'/tmp')) || is_writable($filename))
+	if ((!file_exists($filename) && is_writable(VARLIB_PATH)) || is_writable($filename))
 	{
 		file_put_contents($filename, $msg);
 		cache_invalidate($filename);

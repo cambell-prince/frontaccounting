@@ -36,7 +36,7 @@ function getTransactions($category, $location)
 			item.stock_id,
 			item.description, item.inactive,
 			IF(move.stock_id IS NULL, '', move.loc_code) AS loc_code,
-			SUM(IFNULL(move.stock_id, 0)) AS qty_on_hand
+			SUM(IF(move.stock_id IS NULL, 0, move.qty)) AS qty_on_hand
 		FROM (".TB_PREF."stock_master item,"
 			.TB_PREF."stock_category category)
 			LEFT JOIN ".TB_PREF."stock_moves move ON item.stock_id=move.stock_id
@@ -84,7 +84,7 @@ function getPeriods($stockid, $location)
 
 function print_inventory_planning()
 {
-    global $path_to_root;
+    global $path_to_root, $tmonths;
 
     $category = $_POST['PARAM_0'];
     $location = $_POST['PARAM_1'];
@@ -113,13 +113,12 @@ function print_inventory_planning()
 
 	$cols = array(0, 50, 150, 180, 210, 240, 270, 300, 330, 390, 435, 480, 525);
 
-	$per0 = strftime('%b',mktime(0,0,0,date('m'),1,date('Y')));
-	$per1 = strftime('%b',mktime(0,0,0,date('m')-1,1,date('Y')));
-	$per2 = strftime('%b',mktime(0,0,0,date('m')-2,1,date('Y')));
-	$per3 = strftime('%b',mktime(0,0,0,date('m')-3,1,date('Y')));
-	$per4 = strftime('%b',mktime(0,0,0,date('m')-4,1,date('Y')));
-
-	$headers = array(_('Category'), '', $per4, $per3, $per2, $per1, $per0, '3*M',
+	$per0 = $tmonths[date('n',mktime(0,0,0,date('m'),1,date('Y')))];
+	$per1 = $tmonths[date('n',mktime(0,0,0,date('m')-1,1,date('Y')))];
+	$per2 = $tmonths[date('n',mktime(0,0,0,date('m')-2,1,date('Y')))];
+	$per3 = $tmonths[date('n',mktime(0,0,0,date('m')-3,1,date('Y')))];
+	$per4 = $tmonths[date('n',mktime(0,0,0,date('m')-4,1,date('Y')))];
+	$headers = array(_('Category'), '', $per4, $per3, $per2, $per1, $per0, _('3*M'),
 		_('QOH'), _('Cust Ord'), _('Supp Ord'), _('Sugg Ord'));
 
 	$aligns = array('left',	'left',	'right', 'right', 'right', 'right', 'right', 'right',

@@ -57,9 +57,9 @@ if (isset($_GET['AddedID']))
 
 //--------------------------------------------------------------------------------------------------
 
-$wo_details = get_work_order($_POST['selected_id']);
+$wo_details = get_work_order($_POST['selected_id'], true);
 
-if (strlen($wo_details[0]) == 0)
+if ($wo_details === false)
 {
 	display_error(_("The order number sent is not valid."));
 	exit;
@@ -182,8 +182,8 @@ if (!isset($_POST['quantity']) || $_POST['quantity'] == '')
 start_table(TABLESTYLE2);
 br();
 
-ref_row(_("Reference:"), 'ref', '', $Refs->get_next(ST_MANURECEIVE, null, get_post('date_')), false, ST_MANURECEIVE);
 date_row(_("Date:"), 'date_');
+ref_row(_("Reference:"), 'ref', '', $Refs->get_next(ST_MANURECEIVE, null, get_post('date_')), false, ST_MANURECEIVE);
 
 if (!isset($_POST['ProductionType']))
 	$_POST['ProductionType'] = 1;

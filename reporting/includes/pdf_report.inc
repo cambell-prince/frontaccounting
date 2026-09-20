@@ -24,6 +24,7 @@ include_once($path_to_root . "/reporting/includes/reporting.inc");
 include_once($path_to_root . "/admin/db/company_db.inc");
 include_once($path_to_root . "/admin/db/fiscalyears_db.inc");
 include_once($path_to_root . "/admin/db/printers_db.inc");
+include_once($path_to_root . "/includes/ui/ui_globals.inc");
 include_once($path_to_root . "/config.php");
 
 class FrontReport extends Cpdf
@@ -316,8 +317,10 @@ class FrontReport extends Cpdf
 		$logo = company_path() . "/images/" . $this->company['coy_logo'];
 		if (!empty($SysPrefs->prefs['company_logo_report']) && $this->company['coy_logo'] != '' && file_exists($logo))
 		{
-			$this->row -= ($this->lineHeight + 3);
-			$this->AddImage($logo, $companyCol, $this->row, 0, 30);
+			$size = getimagesize($logo);
+			$height = $size[0] > 150 ? $size[1] * 150 / $size[0] : 30; 
+			$this->row -= ($height / 2);
+			$this->AddImage($logo, $companyCol, $this->row, 0, $height);
 			$this->row -= 6;
 		}
 		else
@@ -339,7 +342,7 @@ class FrontReport extends Cpdf
 		$str = $this->fiscal_year;
 		$this->Text($titleCol, $str, $companyCol);
 		$this->Text($companyCol, $this->user);
-		for ($i = 1; $i < count($this->params); $i++)
+		for ($i = 1; $i < count_array($this->params); $i++)
 		{
 			if ($this->params[$i]['from'] != '')
 			{
@@ -369,12 +372,12 @@ class FrontReport extends Cpdf
 		$this->Font('italic');
 		if ($this->headers2 != null)
 		{
-			$count = count($this->headers2);
+			$count = count_array($this->headers2);
 			for ($i = 0; $i < $count; $i++)
 				$this->TextCol2($i, $i + 1,	$this->headers2[$i]);
 			$this->NewLine();
 		}
-		$count = count($this->headers);
+		$count = count_array($this->headers);
 		for ($i = 0; $i < $count; $i++)
 			$this->TextCol($i, $i + 1, $this->headers[$i]);
 		$this->Font();
@@ -387,7 +390,7 @@ class FrontReport extends Cpdf
 	*/
 	function SetCommonData($myrow, $branch, $sales_order, $bankaccount, $doctype, $contacts)
 	{
-
+		$this->pageNumber = 0;
 		$this->formData = array();
 		$datnames = array( 
 		'myrow' => array('ord_date', 'date_', 'tran_date', 
@@ -740,7 +743,7 @@ class FrontReport extends Cpdf
 
 	function TextWrap($xpos, $ypos, $len, $str, $align = 'left', $border = 0, $fill = 0, $link = NULL, $stretch = 1, $spacebreak=false)
 	{
-		$str = strtr($str, array("\r"=>''));
+		$str = ($str != NULL ? strtr($str, array("\r"=>'')) : "");
 
 		if ($this->fontSize != $this->oldFontSize)
 		{
@@ -770,7 +773,7 @@ class FrontReport extends Cpdf
 		setlocale(LC_MONETARY, $amount_locale);
 		if ($color_red && $txt < 0)
 			$this->SetTextColor(255, 0, 0);
-		$ret = $this->TextCol($c, $n, money_format($amount_format, $txt), $corr, $r, $border, $fill, $link, $stretch);
+		$ret = $this->TextCol($c, $n, price_format($txt), $corr, $r, $border, $fill, $link, $stretch);
 		if ($color_red && $txt < 0)
 			$this->SetTextColor(0, 0, 0);
 		return $ret;	
@@ -796,7 +799,7 @@ class FrontReport extends Cpdf
 
 	function TextWrapLines($c, $width, $txt, $align='left', $border=0, $fill=0, $link=NULL, $stretch=0, $spacebreak=true)
 	{
-		$str = explode("\n", $txt);
+		$str = ($txt != NULL ? explode("\n", $txt) : array());
 
 		for ($i = 0; $i < count($str); $i++)
 		{
@@ -950,6 +953,9 @@ class FrontReport extends Cpdf
 	{
 		global $SysPrefs, $path_to_root;
 
+		if (!empty($SysPrefs->prefs['print_dialog_direct']))		
+			$this->includeJS("print();"); // force to open print dialog
+
 		if ($SysPrefs->pdf_debug == 1)
 		{
 			$pdfcode = $this->Output('','S');
@@ -992,14 +998,13 @@ class FrontReport extends Cpdf
 							continue;
 						$emailtype = true;
 						$this->SetLang($contact['lang']);
+						$coy_name = @html_entity_decode($this->company['coy_name'], ENT_QUOTES, $_SESSION['language']->encoding=='iso-8859-2' ? 'ISO-8859-1' : $_SESSION['language']->encoding);
 
 						require_once($path_to_root . "/reporting/includes/class.mail.inc");
-    					$mail = new email(str_replace(",", "", $this->company['coy_name']),
+    					$mail = new email(str_replace(",", "", $coy_name),
     						$this->company['email']);
 						$mail->charset = $this->encoding;
 
-	    				$to = str_replace(",", "", $contact['name'].' '.$contact['name2'])
-	    					." <" . $contact['email'] . ">";
 						$name = $contact['name2'] ? $contact['name2'] : $contact['name'];
     					$msg = _("Dear") . " " . $name . ",\n\n" 
     						. _("Attached you will find ") . " " . $subject ."\n\n";
@@ -1019,8 +1024,9 @@ class FrontReport extends Cpdf
 						}
 
 	    				$msg .= _("Kindest regards") . "\n\n";
-    					$sender = $this->user . "\n" . $this->company['coy_name'] . "\n" . $this->company['postal_address'] . "\n" . $this->company['email'] . "\n" . $this->company['phone'];
-    					$mail->to($to); $try++;
+    					$sender = $this->user . "\n" . $coy_name . "\n" . $this->company['postal_address'] . "\n" . $this->company['email'] . "\n" . $this->company['phone'];
+    					$mail->to(str_replace(",", "", $contact['name'].' '.$contact['name2']), $contact['email']);
+    					$try++;
     					$mail->subject($subject);
     					$mail->text($msg . $sender);
     					$mail->attachment($fname, $this->filename);

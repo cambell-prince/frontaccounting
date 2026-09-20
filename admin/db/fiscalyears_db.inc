@@ -10,6 +10,7 @@
     See the License here <http://www.gnu.org/licenses/gpl-3.0.html>.
 ***********************************************************************/
 require_once($path_to_root. "/includes/ui/items_cart.inc");
+require_once($path_to_root. "/admin/db/attachments_db.inc");
 
 // fiscal year routines
 function add_fiscalyear($from_date, $to_date, $closed)
@@ -161,7 +162,7 @@ function close_year($year)
 	if ($balance != 0.0)
 	{
 		$cart = new items_cart(ST_JOURNAL);
-		$cart->reference = $Refs->get_next(ST_JOURNAL, null, sql2date($to));
+		$cart->reference = $Refs->get_next(ST_JOURNAL, null, $to);
 		$cart->tran_date = $cart->doc_date = $cart->event_date = $to;
 
 		$cart->add_gl_item($co['retained_earnings_act'], 0, 0, -$balance, _("Closing Year"), '', 0);
@@ -188,22 +189,7 @@ function open_year($year)
 //---------------------------------------------------------------------------------------------
 function delete_attachments_and_comments($type_no, $trans_no)
 {
-	
-	$sql = "SELECT * FROM ".TB_PREF."attachments WHERE type_no = $type_no AND trans_no = $trans_no";
-	$result = db_query($sql, "Could not retrieve attachments");
-	$delflag = false;
-	while ($row = db_fetch($result))
-	{
-		$delflag = true;
-		$dir =  company_path(). "/attachments";
-		if (file_exists($dir."/".$row['unique_name']))
-			unlink($dir."/".$row['unique_name']);
-	}
-	if ($delflag)
-	{
-		$sql = "DELETE FROM ".TB_PREF."attachments WHERE  type_no = $type_no AND trans_no = $trans_no";
-		db_query($sql, "Could not delete attachment");
-	}	
+	delete_attachments($type_no, $trans_no);
 	$sql = "DELETE FROM ".TB_PREF."comments WHERE  type = $type_no AND id = $trans_no";
 	db_query($sql, "Could not delete comments");
 	$sql = "DELETE FROM ".TB_PREF."refs WHERE  type = $type_no AND id = $trans_no";
@@ -263,7 +249,9 @@ function delete_this_fiscalyear($selected_id)
 		delete_attachments_and_comments(25, $row['id']);
 	}
 	$sql = "SELECT trans_no, type FROM ".TB_PREF."debtor_trans WHERE tran_date <= '$to' AND 
-		(ov_amount + ov_gst + ov_freight + ov_freight_tax + ov_discount) = alloc";
+		(ov_amount + ov_gst + ov_freight + ov_freight_tax + ov_discount) = 
+		(SELECT SUM(amt) FROM ".TB_PREF."cust_allocations WHERE date_alloc <= '$to' AND trans_no = trans_no_to AND
+		type = trans_type_to)";
 	$result = db_query($sql, "Could not retrieve debtor trans");
 	while ($row = db_fetch($result))
 	{
@@ -288,7 +276,7 @@ function delete_this_fiscalyear($selected_id)
 		delete_attachments_and_comments($row['type'], $row['trans_no']);
 	}
 	$sql = "SELECT trans_no, type FROM ".TB_PREF."supp_trans WHERE tran_date <= '$to' AND 
-		ABS(ov_amount + ov_gst + ov_discount) = alloc";
+		ABS(ov_amount + ov_gst + ov_discount) = (SELECT ABS(SUM(amt)) FROM ".TB_PREF."supp_allocations WHERE date_alloc <= '$to' AND trans_no = trans_no_to AND type = trans_type_to)";
 	$result = db_query($sql, "Could not retrieve supp trans");
 	while ($row = db_fetch($result))
 	{
@@ -322,8 +310,9 @@ function delete_this_fiscalyear($selected_id)
 		db_query($sql, "Could not delete workorders");
 		delete_attachments_and_comments(ST_WORKORDER, $row['id']);
 	}
-	$sql = "SELECT loc_code, stock_id, SUM(qty) AS qty, SUM(qty*standard_cost) AS std_cost FROM ".TB_PREF."stock_moves WHERE tran_date <= '$to' GROUP by 
-		loc_code, stock_id";
+	$sql = "SELECT loc_code, stock_id, SUM(qty) AS qty,"
+	    ." SUM(-qty*IF(type=".ST_SUPPRECEIVE." OR type=".ST_SUPPCREDIT.", price, standard_cost)) AS std_cost"
+	    ." FROM ".TB_PREF."stock_moves WHERE tran_date <= '$to' GROUP by loc_code, stock_id";
 	$result = db_query($sql, "Could not retrieve stock moves");
 	while ($row = db_fetch($result))
 	{
@@ -350,6 +339,7 @@ function delete_this_fiscalyear($selected_id)
 
 	$last_account='';
 	$new = false;
+	$total = 0.0;
 	while ($row = db_fetch($result))
 	{
 		if ($last_account != $row['account']) // deletes all subledgers postings, so do it once for account
@@ -364,6 +354,8 @@ function delete_this_fiscalyear($selected_id)
 				(".ST_JOURNAL.", $trans_no, '$to', '{$row['account']}', '$ref', {$row['amount']}, "
 				.db_escape($row['person_type_id'], true).", ".db_escape($row['person_id'], true).")";
 			db_query($sql, "Could not insert gl trans");
+			if ($row['amount'] > 0.0)
+				$total += $row['amount'];
 			$new = true;
 		}
 	}

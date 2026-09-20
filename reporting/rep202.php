@@ -39,9 +39,9 @@ function get_invoices($supplier_id, $to, $all=true)
 	if ($all)
     	$value = "(trans.ov_amount + trans.ov_gst + trans.ov_discount)";
     else
-    	$value = "IF (trans.type=".ST_SUPPINVOICE." OR trans.type=".ST_BANKDEPOSIT.", 
-    	(trans.ov_amount + trans.ov_gst + trans.ov_discount - trans.alloc),
-    	(trans.ov_amount + trans.ov_gst + trans.ov_discount + trans.alloc))";
+    	$value = "IF (trans.type=".ST_SUPPINVOICE." OR trans.type=".ST_BANKDEPOSIT." OR (trans.type=".ST_JOURNAL." AND (trans.ov_amount + trans.ov_gst + trans.ov_discount)>0),  
+    		(trans.ov_amount + trans.ov_gst + trans.ov_discount - trans.alloc),
+    		(trans.ov_amount + trans.ov_gst + trans.ov_discount + trans.alloc))";
 	$due = "IF (trans.type=".ST_SUPPINVOICE." OR trans.type=".ST_SUPPCREDIT.",trans.due_date,trans.tran_date)";
 	$sql = "SELECT trans.type,
 		trans.reference,
@@ -55,11 +55,11 @@ function get_invoices($supplier_id, $to, $all=true)
 			".TB_PREF."supp_trans trans
 
 	   	WHERE supplier.supplier_id = trans.supplier_id
-			AND trans.supplier_id = $supplier_id
+			AND trans.supplier_id = ".db_escape($supplier_id)."
 			AND trans.tran_date <= '$todate'
 			AND ABS(trans.ov_amount + trans.ov_gst + trans.ov_discount) > ".FLOAT_COMP_DELTA;
 	if (!$all)
-		$sql .= " AND ABS(trans.ov_amount + trans.ov_gst + trans.ov_discount) - trans.alloc > ".FLOAT_COMP_DELTA;
+		$sql .= "AND $value <> 0 ";
 	$sql .= " ORDER BY trans.tran_date";
 
 
@@ -91,7 +91,8 @@ function print_aged_supplier_analysis()
 	if ($graphics)
 	{
 		include_once($path_to_root . "/reporting/includes/class.graphic.inc");
-		$pg = new graph();
+		$pg = new chart($graphics);
+		$serie = array();
 	}
 
 	if ($fromsupp == ALL_TEXT)
@@ -157,7 +158,7 @@ function print_aged_supplier_analysis()
 	$pastdue1 = $PastDueDays1 + 1 . "-" . $PastDueDays2 . " " . _('Days');
 	$pastdue2 = _('Over') . " " . $PastDueDays2 . " " . _('Days');
 
-	$sql = "SELECT supplier_id, supp_name AS name, curr_code FROM ".TB_PREF."suppliers";
+	$sql = "SELECT supplier_id, supp_name AS name, curr_code, inactive FROM ".TB_PREF."suppliers";
 	if ($fromsupp != ALL_TEXT)
 		$sql .= " WHERE supplier_id=".db_escape($fromsupp);
 	$sql .= " ORDER BY supp_name";
@@ -187,7 +188,7 @@ function print_aged_supplier_analysis()
 		if ($no_zeros && floatcmp(array_sum($str), 0) == 0) continue;
 
 		$rep->fontSize += 2;
-		$rep->TextCol(0, 2,	$myrow['name']);
+		$rep->TextCol(0, 2,	$myrow['name'].($myrow['inactive']==1 ? " ("._("Inactive").")" : ""));
 		if ($convert) $rep->TextCol(2, 3,	$myrow['curr_code']);
 		$rep->fontSize -= 2;
 		$total[0] += ($supprec["Balance"] - $supprec["Due"]);
@@ -211,7 +212,7 @@ function print_aged_supplier_analysis()
 				$rep->TextCol(1, 2,	$trans['reference'], -2);
 				$rep->TextCol(2, 3,	sql2date($trans['tran_date']), -2);
 				foreach ($trans as $i => $value)
-					$trans[$i] *= $rate;
+					$trans[$i] = (float)$trans[$i] * $rate;
 				$str = array($trans["Balance"] - $trans["Due"],
 					$trans["Due"]-$trans["Overdue1"],
 					$trans["Overdue1"]-$trans["Overdue2"],
@@ -237,21 +238,21 @@ function print_aged_supplier_analysis()
 		$rep->AmountCol($i + 3, $i + 4, $total[$i], $dec);
 		if ($graphics && $i < count($total) - 1)
 		{
-			$pg->y[$i] = abs($total[$i]);
+			$serie[$i] = abs($total[$i]);
 		}
 	}
    	$rep->Line($rep->row  - 8);
    	$rep->NewLine();
    	if ($graphics)
    	{
-		$pg->x = array(_('Current'), $nowdue, $pastdue1, $pastdue2);
-		$pg->title     = $rep->title;
-		$pg->axis_x    = _("Days");
-		$pg->axis_y    = _("Amount");
-		$pg->graphic_1 = $to;
-		$pg->type      = $graphics;
-		$pg->skin      = $SysPrefs->graph_skin;
-		$pg->built_in  = false;
+		$pg->setStream('png');
+		$pg->setLabels(array(_('Current'), $nowdue, $pastdue1, $pastdue2));
+		$pg->addSerie(_("Balances"), $serie);
+		$pg->setTitle($rep->title);
+		$pg->setXTitle(_("Days"));
+		$pg->setYTitle(_("Amount"));
+		$pg->setDTitle(number_format2($total[4]));
+		$pg->setValues(true);
 		$pg->latin_notation = ($SysPrefs->decseps[user_dec_sep()] != ".");
 		$filename = company_path(). "/pdf_files/". random_id().".png";
 		$pg->display($filename, true);

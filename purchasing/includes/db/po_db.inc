@@ -9,13 +9,13 @@
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
     See the License here <http://www.gnu.org/licenses/gpl-3.0.html>.
 ***********************************************************************/
+require_once($path_to_root. "/admin/db/attachments_db.inc");
 // ------------------------------------------------------------------------------
 
 function get_supplier_details_to_order(&$order, $supplier_id)
 {
-	$sql = "SELECT curr_code, supp_name, tax_group_id, supp.tax_included,
-			supp.credit_limit - Sum(IFNULL(IF(trans.type=".ST_SUPPCREDIT.", -1, 1) 
-				* (ov_amount + ov_gst + ov_discount),0)) as cur_credit,
+	$sql = "SELECT curr_code, supp_name, tax_group_id, supp.tax_included, dimension_id, dimension2_id,
+			supp.credit_limit - Sum((ov_amount + ov_gst + ov_discount)) as cur_credit,
 				terms.terms, terms.days_before_due, terms.day_in_following_month
 		FROM ".TB_PREF."suppliers supp
 			 LEFT JOIN ".TB_PREF."supp_trans trans ON supp.supplier_id = trans.supplier_id
@@ -36,6 +36,8 @@ function get_supplier_details_to_order(&$order, $supplier_id)
 	$_POST['supplier_id'] = $supplier_id;
 	$_POST['supplier_name'] = $myrow["supp_name"];
 	$_POST['curr_code'] = $myrow["curr_code"];
+	$_POST['dimension'] = $myrow["dimension_id"];
+	$_POST['dimension2'] = $myrow["dimension2_id"];
 
 	$order->set_supplier($supplier_id, $myrow["supp_name"], $myrow["curr_code"], 
 		$myrow["tax_group_id"], $myrow["tax_included"]);
@@ -48,13 +50,14 @@ function delete_po($po)
 	global $Refs;
 
 	begin_transaction();
-	hook_db_prevoid($po, ST_PURCHORDER);
+	hook_db_prevoid(ST_PURCHORDER, $po);
 	$sql = "DELETE FROM ".TB_PREF."purch_orders WHERE order_no=".db_escape($po);
 	db_query($sql, "The order header could not be deleted");
 
 	$sql = "DELETE FROM ".TB_PREF."purch_order_details WHERE order_no =".db_escape($po);
 	db_query($sql, "The order detail lines could not be deleted");
 
+	delete_attachments(ST_PURCHORDER, $po);
 	$Refs->restore_last(ST_PURCHORDER, $po);
 	commit_transaction();
 }
@@ -90,6 +93,12 @@ function add_po(&$po_obj)
      /*Insert the purchase order detail records */
      foreach ($po_obj->line_items as $line_no => $po_line)
      {
+     	if (!$po_line->descr_editable)
+     	{
+			$data = get_purchase_data($po_obj->supplier_id, $po_line->stock_id);
+			if ($data !== false && $data['supplier_description'] != "")
+				$po_line->item_description = $data['supplier_description'];
+      	}
 		$sql = "INSERT INTO ".TB_PREF."purch_order_details (order_no, item_code, description, delivery_date,	unit_price,	quantity_ordered) VALUES (";
 		$sql .= $po_obj->order_no . ", " . db_escape($po_line->stock_id). "," .
 		db_escape($po_line->item_description). ",'" .
@@ -135,6 +144,12 @@ function update_po(&$po_obj)
     /*Now Update the purchase order detail records */
     foreach ($po_obj->line_items as $po_line)
     {
+    	if (!$po_line->descr_editable)
+     	{
+			$data = get_purchase_data($po_obj->supplier_id, $po_line->stock_id);
+			if ($data !== false && $data['supplier_description'] != "")
+				$po_line->item_description = $data['supplier_description'];
+      	}
     	$sql = "INSERT INTO ".TB_PREF."purch_order_details (po_detail_item, order_no, item_code, 
     		description, delivery_date, unit_price, quantity_ordered, quantity_received) VALUES ("
 			.db_escape($po_line->po_detail_rec ? $po_line->po_detail_rec : 0). ","
@@ -155,6 +170,15 @@ function update_po(&$po_obj)
 	commit_transaction();
 
 	return $po_obj->order_no;
+}
+
+//----------------------------------------------------------------------------------------
+
+function get_po($order_no) {
+    $sql = "SELECT * FROM ".TB_PREF."purch_orders WHERE order_no = ".db_escape($order_no);
+    $result = db_query($sql);
+
+    return db_fetch($result);
 }
 
 //----------------------------------------------------------------------------------------
@@ -185,7 +209,7 @@ function read_po_header($order_no, &$order)
 		$order->credit = get_current_supp_credit($order->supplier_id);
 
       	$order->orig_order_date = sql2date($myrow["ord_date"]);
-      	$order->Comments = nl2br($myrow["comments"]);
+      	$order->Comments = $myrow["comments"];
       	$order->Location = $myrow["into_stock_location"];
       	$order->supp_ref = $myrow["requisition_no"];
       	$order->reference = $myrow["reference"];
@@ -207,7 +231,7 @@ function read_po_items($order_no, &$order, $open_items_only=false)
 {
 	/*now populate the line po array with the purchase order details records */
 
-	$sql = "SELECT poline.*, units
+	$sql = "SELECT poline.*, units, editable
 		FROM ".TB_PREF."purch_order_details poline
 			LEFT JOIN ".TB_PREF."stock_master item	ON poline.item_code=item.stock_id
 		WHERE order_no =".db_escape($order_no);
@@ -223,13 +247,11 @@ function read_po_items($order_no, &$order, $open_items_only=false)
     {
 		while ($myrow = db_fetch($result))
         {
-        	$data = get_purchase_data($order->supplier_id, $myrow['item_code']);
-        	if ($data !== false)
-        	{
-        		if ($data['supplier_description'] != "")
-        			$myrow['description'] = $data['supplier_description'];
-        	}		
-            if (is_null($myrow["units"]))
+			$data = get_purchase_data($order->supplier_id, $myrow['item_code']);
+			if ($data !== false && !$myrow['editable'] && $data['supplier_description'] != "" && 
+				$myrow['description'] != $data['supplier_description']) // backward compatibility
+				$myrow['description'] = $data['supplier_description'];
+			if (is_null($myrow["units"]))
             {
 		       	$units = "";
             }
@@ -293,6 +315,8 @@ function get_sql_for_po_search_completed($from, $to, $supplier_id=ALL_TEXT, $loc
 		porder.ord_date, 
 		supplier.curr_code, 
 		Sum(line.unit_price*line.quantity_ordered) AS OrderValue,
+		Sum(line.delivery_date < '". date2sql(Today()) ."'
+		AND (line.quantity_ordered > line.quantity_received)) As OverDue,
 		porder.into_stock_location,
 		chk.isopen
 		FROM ".TB_PREF."purch_orders as porder

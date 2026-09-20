@@ -10,7 +10,7 @@
     See the License here <http://www.gnu.org/licenses/gpl-3.0.html>.
 ***********************************************************************/
 define('DB_DUPLICATE_ERROR', 1062);
-define('SQL_MODE', ''); // STRICT_ALL_TABLES,NO_ZERO_IN_DATE ?
+define('SQL_MODE', 'STRICT_ALL_TABLES'); // prevents SQL injection with silent field content truncation
 
 function set_global_connection($company=-1)
 {
@@ -51,7 +51,7 @@ function db_query($sql, $err_msg=null)
 
 	// set current db prefix
 	$comp = isset($_SESSION["wa_current_user"]->cur_con) ? $_SESSION["wa_current_user"]->cur_con : 0;
-	$cur_prefix = $db_connections[$comp]['tbpref'];
+	$cur_prefix = @$db_connections[$comp]['tbpref'];
 	$sql = str_replace(TB_PREF, $cur_prefix, $sql);
 
 	if ($SysPrefs->show_sql)

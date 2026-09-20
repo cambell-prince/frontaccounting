@@ -114,14 +114,19 @@ function edit_link($row)
 
 function dispatch_link($row)
 {
-	global $trans_type;
+	global $trans_type, $page_nested;
 
 	if ($row['ord_payments'] + $row['inv_payments'] < $row['prep_amount'])
  		return '';
 
 	if ($trans_type == ST_SALESORDER)
-  		return pager_link( _("Dispatch"),
-			"/sales/customer_delivery.php?OrderNumber=" .$row['order_no'], ICON_DOC);
+	{
+		if ($row['TotDelivered'] < $row['TotQuantity'] && !$page_nested)
+			return pager_link( _("Dispatch"),
+				"/sales/customer_delivery.php?OrderNumber=" .$row['order_no'], ICON_DOC);
+		else
+			return '';
+	}		
 	else
   		return pager_link( _("Sales Order"),
 			"/sales/sales_order_entry.php?OrderNumber=" .$row['order_no'], ICON_DOC);
@@ -168,6 +173,21 @@ function tmpl_checkbox($row)
 	. hidden('last['.$row['order_no'].']', $value, false);
 }
 
+function unallocated_prepayments($row)
+{
+
+    if ($row['ord_payments'] > 0) {
+        $pmts = get_payments_for($row['order_no'], $row['trans_type'], $row['debtor_no']);
+
+        foreach($pmts as $pmt)
+        {
+            $list[] = get_trans_view_str($pmt['trans_type_from'], $pmt['trans_no_from'], get_reference($pmt['trans_type_from'], $pmt['trans_no_from']));
+        }
+        return implode(',', $list);
+    } else
+        return '';
+}
+
 function invoice_prep_link($row)
 {
 	// invoicing should be available only for partially allocated orders
@@ -212,11 +232,17 @@ start_table(TABLESTYLE_NOBORDER);
 start_row();
 ref_cells(_("#:"), 'OrderNumber', '',null, '', true);
 ref_cells(_("Ref"), 'OrderReference', '',null, '', true);
+
+if ($show_dates)
+    yesno_list_cells('', 'by_delivery', null, ($trans_type==ST_SALESORDER ? _("Delivery date") : _("Valid until")).':',
+         ($trans_type==ST_SALESORDER ? _("Order date") : _("Quotation date")).':');
+
 if ($show_dates)
 {
   	date_cells(_("from:"), 'OrdersAfterDate', '', null, -user_transaction_days());
   	date_cells(_("to:"), 'OrdersToDate', '', null, 1);
 }
+
 locations_list_cells(_("Location:"), 'StockLocation', null, true, true);
 
 if($show_dates) {
@@ -232,6 +258,10 @@ if (!$page_nested)
 	customer_list_cells(_("Select a customer: "), 'customer_id', null, true, true);
 if ($trans_type == ST_SALESQUOTE)
 	check_cells(_("Show All:"), 'show_all');
+if ($trans_type == ST_SALESORDER)
+	check_cells(_("Zero values"), 'show_voided');
+if ($show_dates && $trans_type == ST_SALESORDER)
+	check_cells(_("No auto"), 'no_auto');
 
 submit_cells('SearchOrders', _("Search"),'',_('Select documents'), 'default');
 hidden('order_view_mode', $_POST['order_view_mode']);
@@ -244,12 +274,12 @@ end_table(1);
 //	Orders inquiry table
 //
 $sql = get_sql_for_sales_orders_view($trans_type, get_post('OrderNumber'), get_post('order_view_mode'),
-	get_post('SelectStockFromList'), get_post('OrdersAfterDate'), get_post('OrdersToDate'), get_post('OrderReference'), get_post('StockLocation'),
-	get_post('customer_id'));
+	get_post('SelectStockFromList'), get_post('OrdersAfterDate'), get_post('OrdersToDate'), get_post('OrderReference'), get_post('StockLocation'), get_post('customer_id'), check_value('show_voided'),
+	get_post('by_delivery'), get_post('no_auto'));
 
 if ($trans_type == ST_SALESORDER)
 	$cols = array(
-		_("Order #") => array('fun'=>'view_link', 'align'=>'right'),
+		_("Order #") => array('fun'=>'view_link', 'align'=>'right', 'ord' =>''),
 		_("Ref") => array('type' => 'sorder.reference', 'ord' => '') ,
 		_("Customer") => array('type' => 'debtor.name' , 'ord' => '') ,
 		_("Branch"), 
@@ -263,7 +293,7 @@ if ($trans_type == ST_SALESORDER)
 	);
 else
 	$cols = array(
-		_("Quote #") => array('fun'=>'view_link', 'align'=>'right'),
+		_("Quote #") => array('fun'=>'view_link', 'align'=>'right', 'ord' => ''),
 		_("Ref"),
 		_("Customer"),
 		_("Branch"), 
@@ -277,8 +307,9 @@ else
 	);
 if ($_POST['order_view_mode'] == 'OutstandingOnly') {
 	array_append($cols, array(
+		array('insert'=>true, 'fun'=>'edit_link'),
 		array('insert'=>true, 'fun'=>'dispatch_link'),
-		array('insert'=>true, 'fun'=>'edit_link')));
+		array('insert'=>true, 'fun'=>'prt_link')));
 
 } elseif ($_POST['order_view_mode'] == 'InvoiceTemplates') {
 	array_substitute($cols, 4, 1, _("Description"));
@@ -291,7 +322,8 @@ if ($_POST['order_view_mode'] == 'OutstandingOnly') {
 	);
 } else if ($_POST['order_view_mode'] == 'PrepaidOrders') {
 	array_append($cols, array(
-			array('insert'=>true, 'fun'=>'invoice_prep_link'))
+		_("New Payments") => array('insert'=>true, 'fun'=>'unallocated_prepayments'),
+		array('insert'=>true, 'fun'=>'invoice_prep_link'))
 	);
 
 } elseif ($trans_type == ST_SALESQUOTE) {
@@ -303,6 +335,7 @@ if ($_POST['order_view_mode'] == 'OutstandingOnly') {
 	 array_append($cols,array(
 			_("Tmpl") => array('insert'=>true, 'fun'=>'tmpl_checkbox'),
 					array('insert'=>true, 'fun'=>'edit_link'),
+					array('insert'=>true, 'fun'=>'dispatch_link'),
 					array('insert'=>true, 'fun'=>'prt_link')));
 };
 

@@ -56,6 +56,12 @@ class FrontReport extends Spreadsheet_Excel_Writer_Workbook
 	var $formatHeaderRight;
 	var $formatFooter;
 	var $formatAmount = array();
+	var $formatRight;
+	var $formatLeft;
+	var $formatTopHeaderLeft;
+	var $formatBottomHeaderLeft;
+	var $formatTopHeaderRight;
+	var $formatBottomHeaderRight;
 	var $headerFunc;
 	
 	var $sheet;
@@ -240,7 +246,7 @@ class FrontReport extends Spreadsheet_Excel_Writer_Workbook
 		$this->headers2 = $headers2;
 		$this->aligns2 = $aligns2;
 		$this->numcols = count($this->headers);
-		$tcols = count($this->headers2);
+		$tcols = count_array($this->headers2);
 		if ($tcols > $this->numcols)
 			$this->numcols = $tcols;
 		for ($i = 0; $i < $this->numcols; $i++)

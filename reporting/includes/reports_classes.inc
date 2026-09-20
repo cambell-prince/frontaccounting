@@ -26,7 +26,7 @@ class BoxReports
 	var $ar_reports;
 	var $ctrl_handlers = array();
 
-	function ReportClasses()
+	function __construct()
 	{
 		$this->ar_classes = array();
 	}
@@ -34,7 +34,7 @@ class BoxReports
 	function addReportClass($class_name, $class_id=null)
 	{
 		if (!$class_id)
-			$class_id = count($this->ar_classes);
+			$class_id = count_array($this->ar_classes);
 		$this->ar_classes[$class_id] = $class_name;
 
 		return $class_id;
@@ -100,7 +100,7 @@ class BoxReports
 						. "<form method='POST' action='$action' target='_blank'>\n";
 					$st_params .= submit('Rep'.$report->id,  
 						_("Display: ") . access_string($report->name, true),
-						false, '', $SysPrefs->pdf_debug ? false : 'default process') . hidden('REP_ID', $report->id, false).'<br><br>';
+						false, '', $SysPrefs->pdf_debug ? false : 'default process popup') . hidden('REP_ID', $report->id, false).'<br><br>';
 					$st_params .= $this->getOptions($report->get_controls(), $report->id);
 					$st_params .= "\n<input type=hidden name='Class' value=".$cur_class.">"
 						."\n</form></td></tr></table>\n";
@@ -170,7 +170,9 @@ class BoxReports
 	{
 		global $path_to_root, $SysPrefs,
 			$type_shortcuts;
-
+		$day_range = get_company_pref("max_days_in_docs");
+		if (!$day_range)
+			$day_range = 180;
 		$st = '';
 			switch ($type)
 			{
@@ -251,7 +253,7 @@ class BoxReports
 
 				case 'GRAPHIC':
 					$sel = array(_("No Graphics"), _("Vertical bars"), _("Horizontal bars"), 
-								_("Dots"), _("Lines"), _("Pie"), _("Donut"));
+								_("Dots"), _("Lines"), _("Pie"), _("Donut"), _("Half Donut"), _("Splines"));
 					return array_selector($name, null, $sel);
 
 				case 'SYS_TYPES':
@@ -276,9 +278,13 @@ class BoxReports
 				case 'GL_ACCOUNTS':
 					return gl_all_accounts_list($name);
 
+				case 'BANK_ACCOUNTS_NO_FILTER':
 				case 'BANK_ACCOUNTS':
-					return bank_accounts_list($name);
-					
+					if ($type == 'BANK_ACCOUNTS_NO_FILTER')
+						return bank_accounts_list($name, null, false, _("All"));
+					else
+						return bank_accounts_list($name);
+
 				case 'DIMENSION':
 					return dimensions_list($name, null, false, ' ', false, true, 0);
 					
@@ -299,7 +305,6 @@ class BoxReports
 
 				case 'CUSTOMERS_NO_FILTER':
 				case 'CUSTOMERS':
-					$sql = "SELECT debtor_no, name FROM ".TB_PREF."debtors_master";
 					if ($type == 'CUSTOMERS_NO_FILTER')
 						return customer_list($name, null, _("No Customer Filter"));
 					else
@@ -307,7 +312,6 @@ class BoxReports
 
 				case 'SUPPLIERS_NO_FILTER':
 				case 'SUPPLIERS':
-					$sql = "SELECT supplier_id, supp_name FROM ".TB_PREF."suppliers";
 					if ($type == 'SUPPLIERS_NO_FILTER')
 						return supplier_list($name, null, _("No Supplier Filter"));
 					else
@@ -319,8 +323,10 @@ class BoxReports
 					$sql = "SELECT concat(debtor_trans.trans_no, '-', debtor_trans.type) AS TNO,
 								concat('$IV ', debtor_trans.$ref,' ', debtor.name) as IName
 						FROM ".TB_PREF."debtors_master debtor,"
-							.TB_PREF."debtor_trans debtor_trans
-						WHERE type=".ST_SALESINVOICE." AND debtor.debtor_no=debtor_trans.debtor_no
+							.TB_PREF."debtor_trans debtor_trans LEFT JOIN ".TB_PREF."voided AS vd ON debtor_trans.type=vd.type AND
+							debtor_trans.trans_no=vd.id
+						WHERE debtor_trans.type=".ST_SALESINVOICE." AND debtor.debtor_no=debtor_trans.debtor_no AND ISNULL(vd.id)
+						AND debtor_trans.tran_date > SUBDATE(CURRENT_DATE, INTERVAL $day_range DAY)
 						ORDER BY debtor_trans.trans_no DESC";
 					return combo_input($name, '', $sql, 'TNO', 'IName',array('order'=>false));
 
@@ -330,18 +336,22 @@ class BoxReports
 					$sql = "SELECT concat(debtor_trans.trans_no, '-', debtor_trans.type) AS TNO,
 								concat('$CN ', debtor_trans.$ref,' ', debtor.name) as IName
 						FROM ".TB_PREF."debtors_master debtor,"
-							.TB_PREF."debtor_trans debtor_trans
-						WHERE type=".ST_CUSTCREDIT." AND debtor.debtor_no=debtor_trans.debtor_no
+							.TB_PREF."debtor_trans debtor_trans LEFT JOIN ".TB_PREF."voided AS vd ON debtor_trans.type=vd.type AND
+							debtor_trans.trans_no=vd.id
+						WHERE debtor_trans.type=".ST_CUSTCREDIT." AND debtor.debtor_no=debtor_trans.debtor_no AND ISNULL(vd.id)
+						AND debtor_trans.tran_date > SUBDATE(CURRENT_DATE, INTERVAL $day_range DAY)
 						ORDER BY debtor_trans.trans_no DESC";
 					return combo_input($name, '', $sql, 'TNO', 'IName',array('order'=>false));
 
 				case 'DELIVERY':
 					$DN = $type_shortcuts[ST_CUSTDELIVERY];
-					$sql = "SELECT	concat(debtor_trans.trans_no, '-', debtor_trans.type) AS TNO,
+					$sql = "SELECT concat(debtor_trans.trans_no, '-', debtor_trans.type) AS TNO,
 								concat(debtor_trans.trans_no, ' $DN ', debtor.name) as IName
 						FROM ".TB_PREF."debtors_master debtor,"
-							.TB_PREF."debtor_trans debtor_trans
-						WHERE type=".ST_CUSTDELIVERY." AND debtor.debtor_no=debtor_trans.debtor_no
+							.TB_PREF."debtor_trans debtor_trans LEFT JOIN ".TB_PREF."voided AS vd ON debtor_trans.type=vd.type AND
+							debtor_trans.trans_no=vd.id
+						WHERE debtor_trans.type=".ST_CUSTDELIVERY." AND debtor.debtor_no=debtor_trans.debtor_no AND ISNULL(vd.id)
+						AND debtor_trans.tran_date > SUBDATE(CURRENT_DATE, INTERVAL $day_range DAY)
 						ORDER BY debtor_trans.trans_no DESC";
 					return combo_input($name, '', $sql, 'TNO', 'IName',array('order'=>false));
 
@@ -350,8 +360,9 @@ class BoxReports
 					$sql = "SELECT sorder.order_no, concat(sorder.$ref, '-', debtor.name) as IName
 						FROM ".TB_PREF."debtors_master debtor,"
 							.TB_PREF."sales_orders sorder
-						WHERE debtor.debtor_no=sorder.debtor_no	AND sorder.trans_type=".ST_SALESORDER
-						." ORDER BY sorder.order_no DESC";
+						WHERE debtor.debtor_no=sorder.debtor_no	AND sorder.trans_type=".ST_SALESORDER." 
+						AND sorder.ord_date > SUBDATE(CURRENT_DATE, INTERVAL $day_range DAY)
+						ORDER BY sorder.order_no DESC";
 					return combo_input($name, '', $sql, 'order_no', 'IName',array('order'=>false));
 
 				case 'QUOTATIONS':
@@ -359,8 +370,9 @@ class BoxReports
 					$sql = "SELECT sorder.order_no, concat(sorder.$ref, '-', debtor.name) as IName
 						FROM ".TB_PREF."debtors_master debtor,"
 							.TB_PREF."sales_orders sorder
-						WHERE debtor.debtor_no=sorder.debtor_no	AND sorder.trans_type=".ST_SALESQUOTE
-							." ORDER BY sorder.order_no DESC";
+						WHERE debtor.debtor_no=sorder.debtor_no	AND sorder.trans_type=".ST_SALESQUOTE." 
+						AND sorder.ord_date > SUBDATE(CURRENT_DATE, INTERVAL $day_range DAY)
+						ORDER BY sorder.order_no DESC";
 					return combo_input($name, '', $sql, 'order_no', 'IName',array('order'=>false));
 
 				case 'PO':
@@ -369,6 +381,7 @@ class BoxReports
 						FROM ".TB_PREF."suppliers supplier,"
 							.TB_PREF."purch_orders po
 						WHERE supplier.supplier_id=po.supplier_id
+						AND po.ord_date > SUBDATE(CURRENT_DATE, INTERVAL $day_range DAY)
 						ORDER BY po.order_no DESC";
 					return combo_input($name, '', $sql, 'order_no', 'IName',array('order'=>false));
 
@@ -378,12 +391,15 @@ class BoxReports
 					$CN = $type_shortcuts[ST_SUPPCREDIT];
 					$ref = ($SysPrefs->print_invoice_no() == 1 ? "trans_no" : "reference");
 					$sql = "SELECT concat(trans.trans_no, '-',trans.type) AS TNO,
-								concat(trans.$ref, IF(type=".ST_BANKPAYMENT.", ' $BP ', IF(type=".ST_SUPPAYMENT.", ' $SP ', ' $CN ')), supplier.supp_name) as IName
-							FROM ".TB_PREF."suppliers supplier, "
-								.TB_PREF."supp_trans trans
-							WHERE type IN(".ST_BANKPAYMENT.",".ST_SUPPAYMENT.",".ST_SUPPCREDIT.")
-								AND supplier.supplier_id=trans.supplier_id
-							ORDER BY trans.trans_no DESC";
+								concat(trans.$ref, IF(trans.type=".ST_BANKPAYMENT.", ' $BP ', IF(trans.type=".ST_SUPPAYMENT.", ' $SP ', 
+								' $CN ')),
+								supplier.supp_name) as IName
+						FROM ".TB_PREF."suppliers supplier, "
+							.TB_PREF."supp_trans trans  LEFT JOIN ".TB_PREF."voided AS vd ON trans.type=vd.type AND trans.trans_no=vd.id
+						WHERE trans.type IN(".ST_BANKPAYMENT.",".ST_SUPPAYMENT.",".ST_SUPPCREDIT.") AND
+							supplier.supplier_id=trans.supplier_id AND ISNULL(vd.id)
+						AND trans.tran_date > SUBDATE(CURRENT_DATE, INTERVAL $day_range DAY)
+						ORDER BY trans.trans_no DESC";
 					return combo_input($name, '', $sql, 'TNO', 'IName',array('order'=>false));
 
 				case 'RECEIPT':
@@ -391,10 +407,12 @@ class BoxReports
 					$CP = $type_shortcuts[ST_CUSTPAYMENT];
 					$ref = ($SysPrefs->print_invoice_no() == 1 ? "trans_no" : "reference");
 					$sql = "SELECT concat(trans.trans_no, '-', trans.type) AS TNO,
-								concat(trans.$ref, IF(type=".ST_BANKDEPOSIT.", ' $BD ', ' $CP '), debtor.name) as IName
+								concat(trans.$ref, IF(trans.type=".ST_BANKDEPOSIT.", ' $BD ', ' $CP '), debtor.name) as IName
 						FROM ".TB_PREF."debtors_master debtor,"
-							.TB_PREF."debtor_trans trans
-						WHERE type IN(".ST_BANKDEPOSIT.",".ST_CUSTPAYMENT.",".ST_CUSTCREDIT.") AND debtor.debtor_no=trans.debtor_no
+							.TB_PREF."debtor_trans trans LEFT JOIN ".TB_PREF."voided AS vd ON trans.type=vd.type AND trans.trans_no=vd.id
+						WHERE trans.type IN(".ST_BANKDEPOSIT.",".ST_CUSTPAYMENT.",".ST_CUSTCREDIT.") AND
+							debtor.debtor_no=trans.debtor_no AND ISNULL(vd.id)
+						AND trans.tran_date > SUBDATE(CURRENT_DATE, INTERVAL $day_range DAY)
 						ORDER BY trans.trans_no DESC";
 					return combo_input($name, '', $sql, 'TNO', 'IName',array('order'=>false));
 
@@ -410,8 +428,10 @@ class BoxReports
 				case 'WORKORDER':
 					$sql = "SELECT wo.id, concat(wo.id, '-', item.description) as IName
 						FROM ".TB_PREF."stock_master item,"
-							.TB_PREF."workorders wo
-						WHERE item.stock_id=wo.stock_id
+							.TB_PREF."workorders wo 
+							LEFT JOIN ".TB_PREF."voided v ON wo.id=v.id and v.type=".ST_WORKORDER."
+						WHERE ISNULL(v.id)
+						AND item.stock_id=wo.stock_id
 						ORDER BY wo.id DESC";
 					return combo_input($name, '', $sql, 'id', 'IName',array('order'=>false));
 
@@ -430,7 +450,7 @@ class BoxReports
 					return sales_types_list($name);
 
 				case 'AREAS':
-					return sales_areas_list($name);
+					return sales_areas_list($name, null, _("No Areas Filter"));
 
 				case 'SALESMEN':
 					return sales_persons_list($name, null, _("No Sales Folk Filter"));

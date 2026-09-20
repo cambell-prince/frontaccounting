@@ -95,20 +95,22 @@ function get_purchase_data($supplier_id, $stock_id)
 function add_or_update_purchase_data($supplier_id, $stock_id, $price, $description="", $uom="")
 {
 	$data = get_purchase_data($supplier_id, $stock_id);
+
+	$description = substr($description, 0, 50); // FIXME: temporary constraint to avoid db errors on long descriptions, see [0005170]
 	if ($data === false)
 	{
 		$sql = "INSERT INTO ".TB_PREF."purch_data (supplier_id, stock_id, price, suppliers_uom,
 			conversion_factor, supplier_description) VALUES (".db_escape($supplier_id)
 			.", ".db_escape($stock_id).", ".db_escape($price).", "
-			.db_escape($uom).", 1, ".db_escape($description).")";
+			.db_escape($uom).", 1, ".db_escape($description).")"; 
 		db_query($sql,"The supplier purchasing details could not be added");
 		return;
 	}	
-	$price = round($price * $data['conversion_factor'], user_price_dec());
+	//$price = round($price * $data['conversion_factor'], user_price_dec());
 	$sql = "UPDATE ".TB_PREF."purch_data SET price=".db_escape($price);
 	if ($uom != "")
 		$sql .= ",suppliers_uom=".db_escape($uom);
-	if ($description != "")	
+	if ($description != "") 	
 		$sql .= ",supplier_description=".db_escape($description);
 	$sql .= " WHERE stock_id=".db_escape($stock_id)." AND supplier_id=".db_escape($supplier_id);
 	db_query($sql,"The supplier purchasing details could not be updated");
@@ -207,13 +209,14 @@ function add_direct_supp_trans($cart)
 			$total += isset($taxitem['Override']) ? $taxitem['Override'] : $taxitem['Value'];
 		}
 	}
+	$inv->currency = $cart->curr_code;
 	$inv->ex_rate = $cart->ex_rate;
 
 	$inv_no = add_supp_invoice($inv);
 
 	if ($cart->cash_account) {
 		$pmt_no = write_supp_payment(0, $inv->supplier_id, $cart->cash_account,	$inv->tran_date, $Refs->get_next(ST_SUPPAYMENT, null, $inv->tran_date), 
-			$total, 0, _('Payment for:').$inv->supp_reference .' ('.$type_shortcuts[ST_SUPPINVOICE].$inv_no.')');
+			$total, 0, _('Payment for:').$inv->supp_reference .' ('.$type_shortcuts[ST_SUPPINVOICE].$inv_no.')' . ' ' . $cart->Comments, 0, 0, $cart->dimension, $cart->dimension2);
 		add_supp_allocation($total, ST_SUPPAYMENT, $pmt_no, ST_SUPPINVOICE, $inv_no, $inv->supplier_id, $inv->tran_date);
 		update_supp_trans_allocation(ST_SUPPINVOICE, $inv_no, $inv->supplier_id);
 		update_supp_trans_allocation(ST_SUPPAYMENT, $pmt_no, $inv->supplier_id);
