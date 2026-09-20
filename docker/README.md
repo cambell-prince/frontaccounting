@@ -82,18 +82,30 @@ The stack is named after the checkout directory, so a worktree gets its own
 containers and its own database volume rather than colliding with the main
 checkout.
 
-## PHP version
+## Base image and PHP version
 
-Defaults to **7.4**. FrontAccounting 2.4.x is written against PHP 5.4-7.x and
-7.4 is the newest version it is known to run on; `.devcontainer` uses 7.4 too.
-`PHP_VERSION=8.2 docker/fa up --build` works if you want to see what breaks, but
-expect deprecation noise and real failures in core.
+Debian **trixie** (13), with PHP from [Ondřej Surý's
+repository](https://deb.sury.org/) rather than the official `php` images.
 
-The `php:7.4-*` images are built on Debian bullseye, whose LTS ended on
-2026-08-31: `deb.debian.org` still serves the `bullseye-security` index but no
-longer serves the packages it points at. The Dockerfile repoints those images at
-`archive.debian.org`, so the build still works. Images for newer PHP versions
-are left alone.
+Those images only ship 7.4 on Debian bullseye, whose LTS ended on 2026-08-31 —
+`deb.debian.org` still serves the `bullseye-security` index but no longer the
+packages it points at, so a build off that base has to be pointed at
+`archive.debian.org` and is frozen there. There is no 7.4 image on trixie and
+there will not be; PHP 7.4 itself went end-of-life in 2022. Building on trixie
+and taking PHP from sury keeps the OS supported and patched while
+FrontAccounting stays on the version it is written against.
+
+`PHP_VERSION` defaults to **7.4** and accepts anything sury publishes for trixie
+(7.4, 8.0 … 8.4). FrontAccounting 2.4.x is written against PHP 5.4-7.x, so 7.4
+is the newest it is known to run on; `PHP_VERSION=8.3 docker/fa up --build`
+works if you want to see what breaks, but expect deprecation noise and real
+failures in core.
+
+Debian's PHP packaging differs from the official images in two ways that matter
+here: there is a separate `conf.d` per SAPI, so `php.ini` is installed into both
+the `apache2` and `cli` trees (the test suite runs under the latter), and
+extensions are toggled with `phpenmod`/`phpdismod` rather than by moving ini
+files about.
 
 ## Debugging
 
@@ -111,6 +123,11 @@ not `restart`, which keeps the existing container and its old environment. Then
 listen on port 9003; it starts on trigger, so set an `XDEBUG_TRIGGER` cookie or
 query parameter. `XDEBUG_MODE=coverage` is what `docker/fa test --coverage-html
 tmp/coverage` needs.
+
+`docker/fa` folds `develop` into whatever mode you ask for, so `debug` becomes
+`develop,debug`. That is the same trap from the other side: with the extension
+loaded but the mode lacking `develop`, `xdebug_call_file()` exists and throws,
+and the suite goes back to erroring 7/7.
 
 `docker/fa logs errors` follows FrontAccounting's own `tmp/errors.log`;
 `docker/fa logs app` follows Apache's.

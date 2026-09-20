@@ -47,6 +47,20 @@ export PHP_VERSION="${PHP_VERSION:-7.4}"
 export MARIADB_VERSION="${MARIADB_VERSION:-10.11}"
 export INSTALL_XDEBUG="${INSTALL_XDEBUG:-true}"
 export XDEBUG_MODE="${XDEBUG_MODE:-off}"
+
+# FA calls xdebug_call_file() on every query when $go_debug is on, and xdebug 3
+# only provides that function in "develop" mode — see docker-entrypoint.sh. So
+# turning xdebug on for step debugging or coverage, without develop, just trades
+# one breakage for another: the suite goes straight back to erroring 7/7. Fold
+# develop in rather than leaving that trap lying in docker/.env.
+#
+# Done here and not in the entrypoint because `docker compose exec` gives a new
+# process the container's recorded environment, not whatever the entrypoint
+# edited — so a fix applied there would reach Apache but not `docker/fa test`.
+case "$XDEBUG_MODE" in
+    off|'' | *develop*) ;;
+    *) XDEBUG_MODE="develop,$XDEBUG_MODE"; export XDEBUG_MODE ;;
+esac
 export FA_TIMEZONE="${FA_TIMEZONE:-UTC}"
 
 export HTTP_PORT="${HTTP_PORT:-8080}"
