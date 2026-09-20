@@ -34,10 +34,12 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$transactionId = add_bank_transfer(
 			TestEnvironment::currentAccount(),
 			TestEnvironment::cashAccount(),
-			'2/3/2014',
+			'2/3/2013',
 			$amount,
 			'1',
 			'Some memo',
+			0,	// dimension_id
+			0,	// dimension2_id
 			0,
 			0
 		);
@@ -49,12 +51,12 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$this->assertEquals(2, db_num_rows($dbResult));
 
 		$transaction1 = db_fetch($dbResult);
-		$this->assertEquals('2014-02-03', $transaction1['trans_date']);
+		$this->assertEquals('2013-02-03', $transaction1['trans_date']);
 		$this->assertEquals(-$amount, $transaction1['amount']);
 		$this->assertEquals('1', $transaction1['ref']);
 
 		$transaction2 = db_fetch($dbResult);
-		$this->assertEquals('2014-02-03', $transaction2['trans_date']);
+		$this->assertEquals('2013-02-03', $transaction2['trans_date']);
 		$this->assertEquals($amount, $transaction2['amount']);
 		$this->assertEquals('1', $transaction2['ref']);
 
@@ -64,10 +66,12 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 			$transactionId,
 			TestEnvironment::cashAccount(),
 			TestEnvironment::currentAccount(),
-			'4/5/2014',
+			'4/5/2013',
 			$amount,
 			'2',
 			'Some other memo',
+			0,	// dimension_id
+			0,	// dimension2_id
 			0,
 			0
 		);
@@ -77,12 +81,12 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$this->assertEquals(2, db_num_rows($dbResult));
 
 		$transaction1 = db_fetch($dbResult);
-		$this->assertEquals('2014-04-05', $transaction1['trans_date']);
+		$this->assertEquals('2013-04-05', $transaction1['trans_date']);
 		$this->assertEquals(-$amount, $transaction1['amount']);
 		$this->assertEquals('2', $transaction1['ref']);
 
 		$transaction2 = db_fetch($dbResult);
-		$this->assertEquals('2014-04-05', $transaction2['trans_date']);
+		$this->assertEquals('2013-04-05', $transaction2['trans_date']);
 		$this->assertEquals($amount, $transaction2['amount']);
 		$this->assertEquals('2', $transaction2['ref']);
 
@@ -91,7 +95,7 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$result = get_bank_trans_for_bank_account(
 			1,
 			'1/1/20214',
-			'12/12/2014'
+			'12/12/2013'
 		);
 		// Check that the original transaction id is not present (it has been voided)
 		// Check that there is no $0 amount
@@ -120,10 +124,12 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$transactionId1 = add_bank_transfer(
 			TestEnvironment::currentAccount(),
 			TestEnvironment::cashAccount(),
-			'2/3/2014',
+			'2/3/2013',
 			$amount,
 			'3',
 			'Some memo',
+			0,	// dimension_id
+			0,	// dimension2_id
 			0,
 			0
 		);
@@ -131,10 +137,12 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$transactionId2 = add_bank_transfer(
 			TestEnvironment::cashAccount(),
 			TestEnvironment::currentAccount(),
-			'2/13/2014',
+			'2/13/2013',
 			$amount,
 			'3',
 			'Some memo',
+			0,	// dimension_id
+			0,	// dimension2_id
 			0,
 			0
 		);
@@ -143,14 +151,14 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 			$transactionId1,
 			TestEnvironment::currentAccount(),
 			TestEnvironment::cashAccount(),
-			'2/10/2014',
+			'2/10/2013',
 			$amount,
 			0,
 			0
 		);
 		$this->assertNotNull($problemTransaction);
 		$this->assertEquals(-20, $problemTransaction['amount']);
-		$this->assertEquals('2014-02-13', $problemTransaction['trans_date']);
+		$this->assertEquals('2013-02-13', $problemTransaction['trans_date']);
 	}
 
 	public function testCheckBankTransfer_TwoTransfersEditFirstTooLate_Fails()
@@ -160,10 +168,12 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$transactionId1 = add_bank_transfer(
 			TestEnvironment::currentAccount(),
 			TestEnvironment::cashAccount(),
-			'2/3/2014',
+			'2/3/2013',
 			$amount,
 			'3',
 			'Some memo',
+			0,	// dimension_id
+			0,	// dimension2_id
 			0,
 			0
 		);
@@ -171,10 +181,12 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$transactionId2 = add_bank_transfer(
 			TestEnvironment::cashAccount(),
 			TestEnvironment::currentAccount(),
-			'2/13/2014',
+			'2/13/2013',
 			$amount,
 			'3',
 			'Some memo',
+			0,	// dimension_id
+			0,	// dimension2_id
 			0,
 			0
 		);
@@ -183,14 +195,14 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 			$transactionId1,
 			TestEnvironment::currentAccount(),
 			TestEnvironment::cashAccount(),
-			'2/20/2014',
+			'2/20/2013',
 			$amount,
 			0,
 			0
 		);
 		$this->assertNotNull($problemTransaction);
 		$this->assertEquals(-30, $problemTransaction['amount']);
-		$this->assertEquals('2014-02-13', $problemTransaction['trans_date']);
+		$this->assertEquals('2013-02-13', $problemTransaction['trans_date']);
 	}
 
 	public function testCheckBankTransfer_TwoTransfersEditFirstJustRight_Succeeds()
@@ -200,10 +212,12 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$transactionId1 = add_bank_transfer(
 			TestEnvironment::currentAccount(),
 			TestEnvironment::cashAccount(),
-			'2/3/2014',
+			'2/3/2013',
 			$amount,
 			'3',
 			'Some memo',
+			0,	// dimension_id
+			0,	// dimension2_id
 			0,
 			0
 		);
@@ -211,10 +225,12 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$transactionId2 = add_bank_transfer(
 			TestEnvironment::cashAccount(),
 			TestEnvironment::currentAccount(),
-			'2/13/2014',
+			'2/13/2013',
 			$amount,
 			'3',
 			'Some memo',
+			0,	// dimension_id
+			0,	// dimension2_id
 			0,
 			0
 		);
@@ -223,7 +239,7 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 			$transactionId1,
 			TestEnvironment::currentAccount(),
 			TestEnvironment::cashAccount(),
-			'2/10/2014',
+			'2/10/2013',
 			$amount,
 			0,
 			0
@@ -238,20 +254,24 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$transactionId1 = add_bank_transfer(
 			TestEnvironment::currentAccount(),
 			TestEnvironment::cashAccount(),
-			'2/3/2014',
+			'2/3/2013',
 			$amount,
 			'3',
 			'Some memo',
+			0,	// dimension_id
+			0,	// dimension2_id
 			0, 0
 		);
 		$amount = 30;
 		$transactionId2 = add_bank_transfer(
 			TestEnvironment::cashAccount(),
 			TestEnvironment::currentAccount(),
-			'2/13/2014',
+			'2/13/2013',
 			$amount,
 			'3',
 			'Some memo',
+			0,	// dimension_id
+			0,	// dimension2_id
 			0,
 			0
 		);
@@ -260,7 +280,7 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 			$transactionId2,
 			TestEnvironment::cashAccount(),
 			TestEnvironment::currentAccount(),
-			'2/13/2014',
+			'2/13/2013',
 			$amount,
 			0
 		);
@@ -274,10 +294,12 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$transactionId1 = add_bank_transfer(
 			TestEnvironment::currentAccount(),
 			TestEnvironment::cashAccount(),
-			'2/3/2014',
+			'2/3/2013',
 			$amount,
 			'3',
 			'Some memo',
+			0,	// dimension_id
+			0,	// dimension2_id
 			0,
 			$amount
 		);
@@ -285,10 +307,12 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$transactionId2 = add_bank_transfer(
 			TestEnvironment::cashAccount(),
 			TestEnvironment::currentAccount(),
-			'2/13/2014',
+			'2/13/2013',
 			$amount,
 			'3',
 			'Some memo',
+			0,	// dimension_id
+			0,	// dimension2_id
 			0,
 			$amount
 		);
@@ -297,13 +321,13 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 			$transactionId2,
 			TestEnvironment::cashAccount(),
 			TestEnvironment::currentAccount(),
-			'2/1/2014',
+			'2/1/2013',
 			$amount,
 			0
 		);
 		$this->assertNotNull($problemTransaction);
 		$this->assertEquals(-40, $problemTransaction['amount']);
-		$this->assertEquals('2014-02-01', $problemTransaction['trans_date']);
+		$this->assertEquals('2013-02-01', $problemTransaction['trans_date']);
 	}
 
 	public function testCheckBankTransfer_TwoTransfersEditFirstLower_Succeeds()
@@ -313,10 +337,12 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$transactionId1 = add_bank_transfer(
 			TestEnvironment::currentAccount(),
 			TestEnvironment::cashAccount(),
-			'2/3/2014',
+			'2/3/2013',
 			$amount,
 			'3',
 			'Some memo',
+			0,	// dimension_id
+			0,	// dimension2_id
 			0,
 			$amount
 		);
@@ -324,10 +350,12 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 		$transactionId2 = add_bank_transfer(
 			TestEnvironment::cashAccount(),
 			TestEnvironment::currentAccount(),
-			'2/13/2014',
+			'2/13/2013',
 			$amount,
 			'3',
 			'Some memo',
+			0,	// dimension_id
+			0,	// dimension2_id
 			0,
 			$amount
 		);
@@ -336,7 +364,7 @@ class GLBankTransferTest extends PHPUnit_Framework_TestCase
 			$transactionId1,
 			TestEnvironment::currentAccount(),
 			TestEnvironment::cashAccount(),
-			'2/3/2014',
+			'2/3/2013',
 			$amount,
 			0
 		);
