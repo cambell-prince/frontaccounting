@@ -33,3 +33,4 @@ vendor_bower/
 /config.php
 /config_db.php
 !index.php
+/docker/.env

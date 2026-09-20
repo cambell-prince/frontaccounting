@@ -1,0 +1,680 @@
+#!/usr/bin/env bash
+#
+# fa — drive the FrontAccounting test stack from the host.
+#
+# Everything is resolved relative to this script, so it works from any directory
+# and from any worktree:
+#
+#   docker/fa init      # write docker/.env with free host ports
+#   docker/fa up        # build, boot, seed the database, write config files
+#   docker/fa test      # run the PHPUnit suite in the container
+#   docker/fa shell     # a shell in the web container, in the checkout
+#
+# Run `docker/fa help` for the full list.
+
+set -euo pipefail
+
+DOCKER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$DOCKER_DIR/.." && pwd)"
+COMPOSE_FILE="$DOCKER_DIR/docker-compose.yml"
+ENV_FILE="$DOCKER_DIR/.env"
+
+export PROJECT_ROOT
+
+# Per-checkout overrides (ports, PHP version, credentials). Optional;
+# `fa init` writes one.
+if [ -f "$ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$ENV_FILE"
+    set +a
+fi
+
+# One stack per checkout by default, keyed on the directory name, so a worktree
+# never collides with the main checkout's containers or database volume.
+if [ -z "${COMPOSE_PROJECT_NAME:-}" ]; then
+    slug="$(basename "$PROJECT_ROOT" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9_-]/-/g')"
+    COMPOSE_PROJECT_NAME="fa-${slug}"
+fi
+export COMPOSE_PROJECT_NAME
+
+# Apache runs as www-data remapped to these, so everything it writes into the
+# bind-mounted checkout stays owned by you on the host.
+export USER_UID="${USER_UID:-$(id -u)}"
+export USER_GID="${USER_GID:-$(id -g)}"
+
+export PHP_VERSION="${PHP_VERSION:-7.4}"
+export MARIADB_VERSION="${MARIADB_VERSION:-10.11}"
+export INSTALL_XDEBUG="${INSTALL_XDEBUG:-true}"
+export XDEBUG_MODE="${XDEBUG_MODE:-off}"
+export FA_TIMEZONE="${FA_TIMEZONE:-UTC}"
+
+export HTTP_PORT="${HTTP_PORT:-8080}"
+export DB_PORT="${DB_PORT:-3307}"
+export PMA_PORT="${PMA_PORT:-8081}"
+
+export DB_NAME="${DB_NAME:-fa_test}"
+export DB_USER="${DB_USER:-fa}"
+export DB_PASSWORD="${DB_PASSWORD:-fa}"
+export DB_ROOT_PASSWORD="${DB_ROOT_PASSWORD:-fa}"
+export DB_PREFIX="${DB_PREFIX:-0_}"
+
+SERVICE=app
+DB_SERVICE=db
+APP_ROOT=/var/www/html
+
+# Dataset loaded by `fa up` when the database is empty, and by `fa db reset`.
+SEED="${SEED:-test}"
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+
+die() {
+    printf 'fa: %s\n' "$*" >&2
+    exit 1
+}
+
+info() {
+    printf '\033[36m==>\033[0m %s\n' "$*"
+}
+
+warn() {
+    printf '\033[33m==>\033[0m %s\n' "$*" >&2
+}
+
+compose() {
+    docker compose -f "$COMPOSE_FILE" --project-directory "$DOCKER_DIR" "$@"
+}
+
+# -T because agents and scripts pipe this; there is no TTY to allocate.
+c_exec() {
+    compose exec -T "$SERVICE" "$@"
+}
+
+# For commands whose output a person watches (phpunit, composer, a log tail).
+# Keep the TTY when there is one and drop it when this script is itself piped,
+# where docker would otherwise refuse with "the input device is not a TTY".
+c_exec_tty() {
+    local tty_args=()
+    [ -t 0 ] && [ -t 1 ] || tty_args=(-T)
+    compose exec "${tty_args[@]}" "$@"
+}
+
+running() {
+    local id
+    id="$(compose ps -q "$SERVICE" 2>/dev/null)" || return 1
+    [ -n "$id" ] || return 1
+    [ "$(docker inspect -f '{{.State.Running}}' "$id" 2>/dev/null)" = "true" ]
+}
+
+ensure_running() {
+    running || die "the stack is not running — run 'docker/fa up' first"
+}
+
+# mysql inside the db container, as root. Kept off the host so no client is
+# needed there and DB_PORT can stay closed if someone wants it closed.
+db_mysql() {
+    compose exec -T "$DB_SERVICE" \
+        mysql -u root -p"$DB_ROOT_PASSWORD" "$@"
+}
+
+db_ready() {
+    db_mysql -e 'SELECT 1' >/dev/null 2>&1
+}
+
+wait_for_db() {
+    local waited=0
+    until db_ready; do
+        waited=$((waited + 2))
+        [ "$waited" -ge 120 ] && die "the database did not come up within 120s — check 'docker/fa logs db'"
+        sleep 2
+    done
+}
+
+# Whether FrontAccounting's schema is already there, rather than whether the
+# database exists: MYSQL_DATABASE creates an empty one on first boot.
+db_seeded() {
+    local count
+    count="$(db_mysql -N -B "$DB_NAME" \
+        -e "SELECT COUNT(*) FROM information_schema.tables
+            WHERE table_schema='$DB_NAME' AND table_name='${DB_PREFIX}users'" 2>/dev/null)" || return 1
+    [ "${count:-0}" -gt 0 ]
+}
+
+listening_ports() {
+    command -v ss >/dev/null 2>&1 || return 0
+    ss -lntH 2>/dev/null | awk '{ n = split($4, a, ":"); print a[n] }' | sort -u
+}
+
+port_in_use() {
+    if command -v ss >/dev/null 2>&1; then
+        listening_ports | grep -qx "$1" && return 0
+    fi
+    (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1 || return 1
+    exec 3<&- 3>&-
+    return 0
+}
+
+# Ports handed out earlier in the same init run are not listening yet, so
+# port_in_use cannot see them. Without _claimed_ports, probing 8080 (busy) and
+# then 8081 would assign 8081 to both the application and phpMyAdmin.
+#
+# The answer comes back in REPLY rather than on stdout because $(...) would run
+# this in a subshell, where the claim would be thrown away with it.
+_claimed_ports=''
+
+find_free_port() {
+    local port="$1"
+    while port_in_use "$port" || [[ " $_claimed_ports " == *" $port "* ]]; do
+        port=$((port + 1))
+    done
+    _claimed_ports="$_claimed_ports $port"
+    REPLY="$port"
+}
+
+# Keep a copy before replacing a generated config file. These are gitignored, so
+# git is no safety net for them, and someone's working credentials are easy to
+# destroy by accident.
+backup_file() {
+    local file="$1"
+    [ -f "$file" ] || return 0
+    local stamp
+    stamp="$(date -u +%Y%m%d%H%M%S)"
+    cp -p "$file" "$file.bak.$stamp"
+    info "kept $(basename "$file") as $(basename "$file").bak.$stamp"
+}
+
+# A config_db.php kept from another setup (.devcontainer, a local LAMP, a real
+# installation) names a different host or database, and FrontAccounting then
+# fails with a connection error that says nothing about which file is at fault.
+#
+# Let PHP read the file rather than grepping it: these files routinely hold
+# several companies, and one of them having 'fa_test' as a *username* is enough
+# to fool a string match into thinking the default company is the test database.
+check_db_config() {
+    running || return 0
+
+    local actual
+    actual="$(c_exec php -r '
+        $def_coy = 0;
+        require "/var/www/html/config_db.php";
+        $c = $db_connections[$def_coy];
+        echo $c["host"], "|", $c["dbname"];
+    ' 2>/dev/null)" || return 0
+
+    [ "$actual" = "db|$DB_NAME" ] && return 0
+
+    warn "config_db.php sends company ${actual%%|*}/${actual##*|} — not this stack's
+     db/$DB_NAME. FrontAccounting will not reach the database started here, and
+     'docker/fa test' skips every test unless the database is named 'fa_test'.
+     Run 'docker/fa config --force' to regenerate it; the old file is kept."
+}
+
+# ---------------------------------------------------------------------------
+# commands
+# ---------------------------------------------------------------------------
+
+cmd_init() {
+    if [ -f "$ENV_FILE" ] && [ "${1:-}" != "--force" ]; then
+        die ".env already exists at $ENV_FILE (pass --force to overwrite)"
+    fi
+
+    info "probing for free ports"
+    local http db pma
+    find_free_port "$HTTP_PORT"; http="$REPLY"
+    find_free_port "$DB_PORT";   db="$REPLY"
+    find_free_port "$PMA_PORT";  pma="$REPLY"
+
+    # Re-running with --force (because a port went stale, say) must not discard
+    # anything added by hand. Keep every KEY=value line this command does not
+    # itself generate.
+    local generated='^(COMPOSE_PROJECT_NAME|HTTP_PORT|DB_PORT|PMA_PORT)='
+    local preserved=""
+    if [ -f "$ENV_FILE" ]; then
+        preserved="$(grep -E '^[A-Za-z_][A-Za-z0-9_]*=' "$ENV_FILE" | grep -vE "$generated" || true)"
+    fi
+
+    cat > "$ENV_FILE" <<EOF
+# Generated by \`docker/fa init\` on $(date -u +%Y-%m-%dT%H:%M:%SZ).
+# Local overrides for this checkout — not tracked by git.
+# See .env.example for everything else that can go in here.
+
+COMPOSE_PROJECT_NAME=$COMPOSE_PROJECT_NAME
+
+HTTP_PORT=$http
+DB_PORT=$db
+PMA_PORT=$pma
+EOF
+
+    if [ -n "$preserved" ]; then
+        {
+            printf '\n# Preserved from the previous %s (not written by init):\n' "$(basename "$ENV_FILE")"
+            printf '%s\n' "$preserved"
+        } >> "$ENV_FILE"
+    fi
+
+    info "wrote $ENV_FILE (http=$http db=$db)"
+}
+
+cmd_up() {
+    local build_args=() up_args=() skip_seed=0 with_tools=0
+    for arg in "$@"; do
+        case "$arg" in
+            --build) build_args+=(--build) ;;
+            --recreate) up_args+=(--force-recreate) ;;
+            --no-seed) skip_seed=1 ;;
+            --with-tools) with_tools=1 ;;
+            *) die "unknown option for up: $arg" ;;
+        esac
+    done
+
+    if ! running && port_in_use "$HTTP_PORT"; then
+        die "port HTTP_PORT=$HTTP_PORT is already in use.
+Run 'docker/fa init' to write docker/.env with free ports, or set it yourself."
+    fi
+
+    # FA writes here at runtime and .gitignore keeps them out of a fresh clone,
+    # so Apache would hit a missing directory rather than an unwritable one.
+    mkdir -p "$PROJECT_ROOT/tmp" \
+             "$PROJECT_ROOT/company/0/js_cache" \
+             "$PROJECT_ROOT/company/0/pdf_files" \
+             "$PROJECT_ROOT/company/0/backup" \
+             "$PROJECT_ROOT/company/0/images"
+
+    local profile_args=()
+    [ "$with_tools" = 1 ] && profile_args=(--profile tools)
+
+    info "starting '$COMPOSE_PROJECT_NAME' (php $PHP_VERSION, mariadb $MARIADB_VERSION)"
+    compose "${profile_args[@]}" up -d "${up_args[@]}" "${build_args[@]}"
+
+    info "waiting for the database"
+    wait_for_db
+
+    cmd_config
+
+    if [ "$skip_seed" = 1 ]; then
+        info "skipping the database seed (--no-seed)"
+    elif db_seeded; then
+        info "database '$DB_NAME' already holds a FrontAccounting schema — leaving it alone"
+    else
+        cmd_db load "$SEED"
+    fi
+
+    cmd_info
+}
+
+# Writes the files FrontAccounting needs but does not ship, because they hold
+# per-installation settings: all four are gitignored. Existing ones are left
+# alone unless --force, since a developer's own config.php is easy to lose and
+# impossible to get back from git.
+cmd_config() {
+    local force=0
+    [ "${1:-}" = "--force" ] && force=1
+
+    local db_config="$PROJECT_ROOT/config_db.php"
+    if [ ! -f "$db_config" ] || [ "$force" = 1 ]; then
+        backup_file "$db_config"
+        cat > "$db_config" <<EOF
+<?php
+/*
+	Generated by \`docker/fa config\`. Points at the 'db' service of the compose
+	stack in docker/, which is reachable under that name from inside the app
+	container only. Re-generate with \`docker/fa config --force\`.
+*/
+
+\$def_coy = 0;
+
+\$tb_pref_counter = 1;
+
+\$db_connections = array (
+  0 =>
+  array (
+    'name' => 'Docker',
+    'host' => 'db',
+    'dbuser' => '$DB_USER',
+    'dbpassword' => '$DB_PASSWORD',
+    'dbname' => '$DB_NAME',
+    'tbpref' => '$DB_PREFIX',
+  ),
+);
+EOF
+        info "wrote config_db.php -> db/$DB_NAME as $DB_USER"
+    else
+        info "config_db.php exists — left alone (--force to replace)"
+        check_db_config
+    fi
+
+    local config="$PROJECT_ROOT/config.php"
+    if [ ! -f "$config" ]; then
+        cp "$PROJECT_ROOT/config.default.php" "$config"
+        info "wrote config.php from config.default.php"
+    elif [ "$force" = 1 ]; then
+        backup_file "$config"
+        cp "$PROJECT_ROOT/config.default.php" "$config"
+        info "replaced config.php from config.default.php"
+    fi
+
+    # An absent file here is a fatal include, not an empty extension list.
+    local ext="$PROJECT_ROOT/installed_extensions.php"
+    if [ ! -f "$ext" ]; then
+        cat > "$ext" <<'EOF'
+<?php
+
+/* Generated by `docker/fa config`. See the FA extension system documentation
+	for the format. */
+
+$next_extension_id = 0;
+
+$installed_extensions = array (
+);
+EOF
+        info "wrote installed_extensions.php"
+    fi
+
+    local langs="$PROJECT_ROOT/lang/installed_languages.inc"
+    if [ ! -f "$langs" ]; then
+        mkdir -p "$PROJECT_ROOT/lang"
+        cat > "$langs" <<'EOF'
+<?php
+
+/* Generated by `docker/fa config`. */
+
+$installed_languages = array (
+  0 =>
+  array (
+    'code' => 'C',
+    'name' => 'English',
+    'encoding' => 'iso-8859-1',
+    'version' => '1',
+  ),
+);
+
+$dflt_lang = 'C';
+EOF
+        info "wrote lang/installed_languages.inc"
+    fi
+}
+
+cmd_db() {
+    local sub="${1:-}"
+    shift || true
+    case "$sub" in
+        load)   db_load "${1:-$SEED}" ;;
+        reset)  db_drop; db_load "${1:-$SEED}" ;;
+        drop)   db_drop ;;
+        dump)   db_dump "$@" ;;
+        shell)  cmd_mysql ;;
+        *) die "usage: fa db <load [test|new|demo]|reset|drop|dump [file]|shell>" ;;
+    esac
+}
+
+# Every dataset — the fixtures and sql/en_US-*.sql alike — has the stock 0_
+# prefix baked into all 500-odd statements. Rewrite it on the way in when
+# DB_PREFIX says otherwise, rather than loading a schema FA cannot see.
+prefix_filter() {
+    if [ "$DB_PREFIX" = "0_" ]; then
+        cat
+    else
+        sed "s/\`0_/\`$DB_PREFIX/g"
+    fi
+}
+
+db_load() {
+    local which="$1" src
+    ensure_running
+    wait_for_db
+
+    case "$which" in
+        test) src="$PROJECT_ROOT/modules/tests/data/fa_test.sql.gz" ;;
+        demo-fixture) src="$PROJECT_ROOT/modules/tests/data/fa_demo.sql.gz" ;;
+        new)  src="$PROJECT_ROOT/sql/en_US-new.sql" ;;
+        demo) src="$PROJECT_ROOT/sql/en_US-demo.sql" ;;
+        *)
+            # Anything else is taken as a path, so a backup can be restored.
+            src="$which"
+            [ -f "$src" ] || die "unknown dataset '$which' — use test, new, demo, demo-fixture, or a path to a .sql/.sql.gz file"
+            ;;
+    esac
+    [ -f "$src" ] || die "dataset file not found: $src"
+
+    # The account and grant come from MYSQL_USER/MYSQL_DATABASE, which the
+    # mariadb entrypoint applies only when it initialises an empty volume — so
+    # changing DB_NAME or DB_USER later would otherwise leave FA locked out of
+    # its own database.
+    db_mysql -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\`;
+                 CREATE USER IF NOT EXISTS '$DB_USER'@'%' IDENTIFIED BY '$DB_PASSWORD';
+                 GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'%';"
+
+    info "loading $(basename "$src") into '$DB_NAME'"
+
+    if [ "${src##*.}" = "gz" ]; then
+        gunzip -c "$src" | prefix_filter | db_mysql "$DB_NAME"
+    else
+        prefix_filter < "$src" | db_mysql "$DB_NAME"
+    fi
+
+    info "loaded — sign in at http://localhost:${HTTP_PORT}/"
+    case "$which" in
+        test|demo-fixture) info "fixture login: test / test" ;;
+        new|demo) info "installer login: admin / password (FrontAccounting defaults)" ;;
+    esac
+}
+
+db_drop() {
+    ensure_running
+    wait_for_db
+    info "dropping database '$DB_NAME'"
+    db_mysql -e "DROP DATABASE IF EXISTS \`$DB_NAME\`; CREATE DATABASE \`$DB_NAME\`;
+                 GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'%';"
+}
+
+db_dump() {
+    ensure_running
+    wait_for_db
+    local out="${1:-$PROJECT_ROOT/tmp/$DB_NAME-$(date -u +%Y%m%d%H%M%S).sql.gz}"
+    mkdir -p "$(dirname "$out")"
+    info "dumping '$DB_NAME' to $out"
+    compose exec -T "$DB_SERVICE" \
+        mysqldump -u root -p"$DB_ROOT_PASSWORD" --single-transaction "$DB_NAME" \
+        | gzip > "$out"
+}
+
+# The package's own entry point rather than vendor/bin/phpunit. The bin/ entry
+# is a proxy composer regenerates only when it installs a package, so an
+# interrupted install can leave it as an empty file — which then runs, prints
+# nothing and exits 0, reporting a green suite that never executed. The package
+# path is written by the install itself and cannot be stale that way.
+PHPUNIT=modules/tests/vendor/phpunit/phpunit/phpunit
+
+cmd_test() {
+    ensure_running
+    # The suite's dependencies are its own, under modules/tests, and are
+    # gitignored — install them on first use rather than making it a manual step.
+    if ! c_exec test -s "$APP_ROOT/$PHPUNIT" 2>/dev/null; then
+        info "installing the PHPUnit dependencies"
+        cmd_composer install --working-dir="$APP_ROOT/modules/tests"
+    fi
+    c_exec test -s "$APP_ROOT/$PHPUNIT" 2>/dev/null \
+        || die "phpunit is still missing after composer install.
+Remove modules/tests/vendor and run 'docker/fa test' again."
+
+    c_exec_tty -w "$APP_ROOT" "$SERVICE" \
+        php "$PHPUNIT" -c modules/tests/phpunit.xml "$@"
+}
+
+cmd_composer() {
+    ensure_running
+    c_exec_tty -w "$APP_ROOT" "$SERVICE" composer "$@"
+}
+
+cmd_shell() {
+    ensure_running
+    compose exec -w "$APP_ROOT" "$SERVICE" bash
+}
+
+cmd_exec() {
+    [ $# -gt 0 ] || die "usage: fa exec <command> [args...]"
+    ensure_running
+    c_exec_tty -w "$APP_ROOT" "$SERVICE" "$@"
+}
+
+cmd_mysql() {
+    ensure_running
+    local tty_args=()
+    [ -t 0 ] && [ -t 1 ] || tty_args=(-T)
+    compose exec "${tty_args[@]}" "$DB_SERVICE" \
+        mysql -u root -p"$DB_ROOT_PASSWORD" "$DB_NAME" "$@"
+}
+
+cmd_logs() {
+    local what="${1:-app}"
+    case "$what" in
+        app|db|phpmyadmin) compose logs -f "$what" ;;
+        errors)
+            ensure_running
+            c_exec_tty "$SERVICE" tail -f "$APP_ROOT/tmp/errors.log"
+            ;;
+        all) compose logs -f ;;
+        *) die "usage: fa logs [app|db|phpmyadmin|errors|all]" ;;
+    esac
+}
+
+cmd_perms() {
+    ensure_running
+    info "restoring ownership of the checkout to $USER_UID:$USER_GID"
+    c_exec chown -R "$USER_UID:$USER_GID" \
+        "$APP_ROOT/tmp" "$APP_ROOT/company" 2>/dev/null || true
+}
+
+cmd_info() {
+    local state='not running'
+    running && state='running'
+
+    cat <<EOF
+
+  Stack         $COMPOSE_PROJECT_NAME ($state)
+  PHP           $PHP_VERSION (xdebug mode: $XDEBUG_MODE)
+  Database      mariadb $MARIADB_VERSION
+
+  Application   http://localhost:${HTTP_PORT}/
+  phpMyAdmin    http://localhost:${PMA_PORT}/      (docker/fa up --with-tools)
+
+  Database      $DB_NAME as $DB_USER, tables prefixed '$DB_PREFIX'
+                from the host: mysql -h 127.0.0.1 -P ${DB_PORT} -u $DB_USER -p$DB_PASSWORD $DB_NAME
+
+  Checkout      $PROJECT_ROOT -> $APP_ROOT
+
+EOF
+}
+
+cmd_destroy() {
+    if [ "${1:-}" != "--yes" ]; then
+        warn "this removes the containers and the database volume"
+        printf 'Type the project name (%s) to confirm: ' "$COMPOSE_PROJECT_NAME"
+        local answer
+        read -r answer
+        [ "$answer" = "$COMPOSE_PROJECT_NAME" ] || die "aborted"
+    fi
+    compose --profile tools down -v --remove-orphans
+    info "destroyed '$COMPOSE_PROJECT_NAME'"
+}
+
+cmd_help() {
+    cat <<'EOF'
+fa — drive the FrontAccounting test stack from the host.
+
+Usage: docker/fa <command> [args...]
+
+Stack
+  init [--force]     Write docker/.env pinning this checkout to free host ports
+  up [options]       Build, boot, write the config files and seed the database
+                     --build        rebuild the image first
+                     --recreate     recreate the containers
+                     --no-seed      leave the database alone
+                     --with-tools   also start phpMyAdmin
+  stop | start | restart
+  build | rebuild    Build the image (rebuild ignores the cache)
+  destroy [--yes]    Remove the containers and the database volume
+  ps                 Container status
+  info               URLs, credentials and mount points
+
+Configuration
+  config [--force]   Write config_db.php, config.php, installed_extensions.php
+                     and lang/installed_languages.inc. Existing files are kept
+                     unless --force, and replaced ones are backed up first.
+
+Database
+  db load [what]     Load a dataset:
+                       test          modules/tests/data/fa_test.sql.gz (default)
+                       demo-fixture  modules/tests/data/fa_demo.sql.gz
+                       new           sql/en_US-new.sql
+                       demo          sql/en_US-demo.sql
+                       <path>        any .sql or .sql.gz file
+  db reset [what]    Drop the database and load it again
+  db drop            Drop and recreate it empty
+  db dump [file]     mysqldump to a .sql.gz (default: tmp/<db>-<stamp>.sql.gz)
+  db shell           mysql client on the application database
+
+Testing and development
+  test [args]        Run the PHPUnit suite, installing its deps on first use
+  composer [args]    composer inside the container, from the checkout root
+  shell              bash in the web container, in the checkout
+  exec <cmd>         Run a command there
+  logs [what]        Follow a log: app (default), db, phpmyadmin, errors, all
+  perms              Give tmp/ and company/ back to the host user
+
+How it fits together
+  The checkout is bind-mounted at /var/www/html and served by Apache + mod_php,
+  so an edit is live on the next request. Apache runs as www-data remapped to
+  your uid/gid, so what FrontAccounting writes into company/ and tmp/ stays
+  yours on the host.
+
+  config.php, config_db.php, installed_extensions.php and
+  lang/installed_languages.inc are gitignored and per-installation, so `up`
+  generates them. It will not overwrite ones you already have — pass
+  `config --force` for that, which keeps a timestamped .bak first.
+
+  Settings live in docker/.env (gitignored); docker/.env.example lists them all.
+  The stack is named after the checkout directory, so worktrees do not collide.
+
+Examples
+  docker/fa init
+  docker/fa up --build
+  docker/fa test
+  docker/fa db reset demo
+  docker/fa logs errors
+EOF
+}
+
+# ---------------------------------------------------------------------------
+
+command -v docker >/dev/null 2>&1 || die "docker is not installed or not on PATH"
+docker compose version >/dev/null 2>&1 || die "the docker compose plugin is required"
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+    init) cmd_init "$@" ;;
+    up) cmd_up "$@" ;;
+    config) cmd_config "$@" ;;
+    db) cmd_db "$@" ;;
+    test) cmd_test "$@" ;;
+    composer) cmd_composer "$@" ;;
+    stop) compose stop "$@" ;;
+    start) compose start "$@" ;;
+    restart) compose restart "$@" ;;
+    build) compose build "$@" ;;
+    rebuild) compose build --no-cache "$@" ;;
+    destroy|down) cmd_destroy "$@" ;;
+    ps|status) compose ps "$@" ;;
+    info|url) cmd_info ;;
+    logs) cmd_logs "$@" ;;
+    perms) cmd_perms ;;
+    mysql) cmd_mysql "$@" ;;
+    shell|bash) cmd_shell ;;
+    exec) cmd_exec "$@" ;;
+    help|-h|--help) cmd_help ;;
+    *) die "unknown command '$cmd' — run 'docker/fa help'" ;;
+esac
