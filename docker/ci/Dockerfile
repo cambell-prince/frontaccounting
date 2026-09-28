@@ -65,6 +65,7 @@ RUN sh /usr/local/lib/fa-ci-build/seed-db.sh
 # www-data can change it (tests rewrite config_db.php and the extension lists).
 COPY --from=fa . /var/www/html/
 COPY image/config_db.php /var/www/html/config_db.php
+COPY image/grant.php /var/www/html/fa-ci/grant.php
 RUN set -eux; \
     cd /var/www/html; \
     rm -f index.html; \

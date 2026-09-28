@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS `0_ci_beta` (`id` int(11) NOT NULL) ENGINE=InnoDB;
