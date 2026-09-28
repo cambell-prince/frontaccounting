@@ -1,0 +1,15 @@
+#!/bin/sh
+# fa-ci-login <cookie-jar>: sign in to FrontAccounting (company 0) as test/test.
+# The jar then holds the session for further curl -b requests.
+set -eu
+jar="$1"
+url="${FA_URL:-http://localhost}"
+page="$(mktemp)"
+trap 'rm -f "$page"' EXIT
+curl -fsS -c "$jar" -b "$jar" -o /dev/null "$url/index.php"
+# A successful sign-in answers 307 back to the page first asked for, so the
+# session is checked with a fresh request rather than from the POST's reply.
+curl -fsS -c "$jar" -b "$jar" -o /dev/null \
+    --data 'user_name_entry_field=test&password=test&company_login_name=0' "$url/index.php"
+curl -fsS -c "$jar" -b "$jar" -o "$page" "$url/index.php"
+grep -qi 'logout' "$page" || { echo "fa-ci-login: FrontAccounting refused test/test" >&2; exit 1; }

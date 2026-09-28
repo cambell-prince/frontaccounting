@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+#
+# The CI image on its own: it boots ready, FrontAccounting signs in, the
+# fixture is loaded, mail is caught, and the FA tree is writable by group
+# www-data.
+#
+#   FA_CI_IMAGE=<image> docker/ci/test/image.sh
+
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source-path=SCRIPTDIR source=../lib.sh
+. "$here/../lib.sh"
+# shellcheck source-path=SCRIPTDIR source=lib.sh
+. "$here/lib.sh"
+: "${FA_CI_IMAGE:?set FA_CI_IMAGE to the image under test}"
+
+c="fa-ci-test-image-$$"
+trap 'docker rm -f "$c" >/dev/null 2>&1 || true' EXIT
+
+echo "image: $FA_CI_IMAGE"
+start="$(date +%s)"
+expect_status 0 "boots and becomes ready" ci_boot "$c" "$FA_CI_IMAGE"
+expect_status 0 "ready within 60s" test "$(( $(date +%s) - start ))" -lt 60
+# shellcheck disable=SC2016 # expands in the container
+expect_status 0 "FA signs in as test/test" docker exec "$c" sh -c 'fa-ci-login "$(mktemp)"'
+expect_status 0 "the fixture is loaded" docker exec "$c" mariadb -N fa_test \
+    -e "SELECT COUNT(*) FROM 0_users WHERE user_id = 'test'"
+expect_contains "the fixture has the test user" "1" "$OUT"
+expect_status 0 "user fa reaches fa_test over TCP" docker exec "$c" mariadb -h 127.0.0.1 -u fa -pfa -N fa_test -e 'SELECT 1'
+expect_status 0 "mail() lands in the catcher" docker exec "$c" sh -c \
+    'php -r "mail(\"a@example.com\", \"ci smoke subject\", \"body\");" && grep -l "ci smoke subject" /var/mail-catcher/*.eml'
+expect_status 0 "the FA tree is writable by group www-data" docker exec "$c" \
+    setpriv --reuid=4242 --regid=4242 --groups=33 sh -c \
+    'umask 002; touch /var/www/html/tmp/ci-write-test /var/www/html/company/0/ci-write-test /var/www/html/config_db.php'
+expect_status 0 "xdebug is not loaded" sh -c "! docker exec $c php -m | grep -qi xdebug"
+expect_status 0 "opcache revalidates every request" docker exec "$c" sh -c \
+    'php -i | grep -q "opcache.revalidate_freq => 0"'
+finish
