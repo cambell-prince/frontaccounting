@@ -106,9 +106,11 @@ save_applied() {
 # Where a listed module comes from on this machine: a FA_DEV_MOUNTS entry over
 # modules/<name>, else the modules folder.
 module_source() {
-    local spec
+    local spec c
     for spec in $FA_DEV_MOUNTS; do
-        [ "${spec#*:}" != "$FA/modules/$1" ] || { echo "${spec%%:*}"; return; }
+        # HOST:CONTAINER[:OPTIONS]
+        c="${spec#*:}"
+        [ "${c%%:*}" != "$FA/modules/$1" ] || { echo "${spec%%:*}"; return; }
     done
     echo "$FA_DEV_MODULES_ROOT/$1"
 }
@@ -153,40 +155,111 @@ run_inits() {
     done
 }
 
-# Every listed module, activated from inactive, then their inits.
+# Reads FA_DEV_MODULES into SPECS (name or name:id) and NAMES; deactivates
+# the modules applied before that it no longer lists, and records the ones
+# kept, so a failed activation after this doesn't leave those listed. WAS is
+# the list applied before, space separated and padded.
+SPECS=()
+NAMES=()
+WAS=''
+unlink_unlisted() {
+    local kept=() s m
+    SPECS=()
+    NAMES=()
+    while IFS= read -r s; do [ -z "$s" ] || SPECS+=("$s"); done < <(module_specs)
+    for s in "${SPECS[@]+"${SPECS[@]}"}"; do NAMES+=("${s%%:*}"); done
+    WAS=" $(applied | tr '\n' ' ') "
+    for m in $WAS; do
+        case " ${NAMES[*]-} " in
+            *" $m "*) kept+=("$m") ;;
+            *) log "deactivating $m"; docker exec "$CONTAINER" fa-ci-deactivate "$m" ;;
+        esac
+    done
+    save_applied "${kept[@]+"${kept[@]}"}"
+}
+
+# Every listed module, activated from inactive, then their inits; those no
+# longer listed deactivated first.
 activate_all() {
-    local specs=() names=() s
-    while IFS= read -r s; do [ -z "$s" ] || specs+=("$s"); done < <(module_specs)
-    for s in "${specs[@]+"${specs[@]}"}"; do names+=("${s%%:*}"); done
-    if [ "${#specs[@]}" -gt 0 ]; then
-        mark_inactive "${names[@]}"
-        ci_activate "$CONTAINER" "${specs[@]}"
+    unlink_unlisted
+    if [ "${#SPECS[@]}" -gt 0 ]; then
+        mark_inactive "${NAMES[@]}"
+        ci_activate "$CONTAINER" "${SPECS[@]}"
     fi
-    save_applied "${names[@]+"${names[@]}"}"
-    run_inits "${names[@]+"${names[@]}"}"
+    save_applied "${NAMES[@]+"${NAMES[@]}"}"
+    run_inits "${NAMES[@]+"${NAMES[@]}"}"
 }
 
 # The listed modules brought in line with FA_DEV_MODULES: those no longer
 # listed deactivated, new ones activated (and their inits run).
 cmd_link() {
-    local specs=() names=() new=() kept=() was s m
-    while IFS= read -r s; do [ -z "$s" ] || specs+=("$s"); done < <(module_specs)
-    for s in "${specs[@]+"${specs[@]}"}"; do names+=("${s%%:*}"); done
-    was=" $(applied | tr '\n' ' ') "
-    for m in $was; do
-        case " ${names[*]-} " in
-            *" $m "*) kept+=("$m") ;;
-            *) log "deactivating $m"; docker exec "$CONTAINER" fa-ci-deactivate "$m" ;;
-        esac
+    local new=() m
+    unlink_unlisted
+    for m in "${NAMES[@]+"${NAMES[@]}"}"; do
+        case "$WAS" in *" $m "*) ;; *) new+=("$m") ;; esac
     done
-    # Recorded now, so a failed activation below doesn't leave these listed.
-    save_applied "${kept[@]+"${kept[@]}"}"
-    for m in "${names[@]+"${names[@]}"}"; do
-        case "$was" in *" $m "*) ;; *) new+=("$m") ;; esac
-    done
-    [ "${#specs[@]}" -eq 0 ] || ci_activate "$CONTAINER" "${specs[@]}"
-    save_applied "${names[@]+"${names[@]}"}"
+    [ "${#SPECS[@]}" -eq 0 ] || ci_activate "$CONTAINER" "${SPECS[@]}"
+    save_applied "${NAMES[@]+"${NAMES[@]}"}"
     run_inits "${new[@]+"${new[@]}"}"
+}
+
+# load_dataset <file on this machine>: replace the database with a backup.
+# fa-ci-dataset tells .gz from plain SQL by the name.
+load_dataset() {
+    local src dest=/tmp/fa-dev-dataset.sql
+    src="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
+    case "$src" in *.gz) dest=/tmp/fa-dev-dataset.sql.gz ;; esac
+    log "dataset: $src"
+    docker cp "$src" "$CONTAINER:$dest"
+    docker exec "$CONTAINER" fa-ci-dataset "$dest"
+    docker exec "$CONTAINER" rm -f "$dest"
+}
+
+# What creation needs from this machine, checked before anything starts:
+# the dataset and extension list files, and each listed module's hooks.php.
+check_inputs() {
+    local m
+    case "$FA_DEV_DATASET" in
+        test|demo) ;;
+        *) [ -f "$FA_DEV_DATASET" ] || { printf 'plugin-dev.sh: no such dataset file: %s\n' "$FA_DEV_DATASET" >&2; exit 2; } ;;
+    esac
+    [ -z "$FA_DEV_EXTENSIONS" ] || [ -f "$FA_DEV_EXTENSIONS" ] \
+        || { printf 'plugin-dev.sh: no such file: %s\n' "$FA_DEV_EXTENSIONS" >&2; exit 2; }
+    [ -d "$FA_DEV_MODULES_ROOT" ] || die "FA_DEV_MODULES_ROOT is not a directory: $FA_DEV_MODULES_ROOT"
+    for m in $FA_DEV_MODULES; do
+        [ -f "$(module_source "$m")/hooks.php" ] || die "FA_DEV_MODULES lists $m, but $(module_source "$m") has no hooks.php"
+    done
+}
+
+# A failure from here on keeps the environment for inspection.
+keep_on_failure() {
+    # shellcheck disable=SC2154 # rc is assigned inside the trap
+    trap 'rc=$?; if [ "$rc" -ne 0 ]; then [ "${CI_DIAGNOSED:-}" = yes ] || ci_diagnostics "$CONTAINER"; log "$CONTAINER kept for inspection: plugin-dev.sh --env $ENV_NAME logs | shell | activate | destroy --yes; up again finishes creating it"; fi' EXIT
+}
+
+# The creation steps after the container is up: the dataset (only into a
+# database volume that was new: fresh=yes), a live site's extension ids, the
+# modules; then /var/lib/fa-dev/created, so a later up knows it finished.
+finish_creation() {
+    if [ "$1" = yes ]; then
+        case "$FA_DEV_DATASET" in
+            test) ;;
+            demo) log "dataset: demo"; docker exec "$CONTAINER" fa-ci-dataset demo ;;
+            *) load_dataset "$FA_DEV_DATASET" ;;
+        esac
+    fi
+    if [ -n "$FA_DEV_EXTENSIONS" ]; then
+        # Modules the site's list doesn't have get ids after every id it has used.
+        docker cp "$FA_DEV_EXTENSIONS" "$CONTAINER:/tmp/fa-dev-extensions.php"
+        docker exec -u www-data "$CONTAINER" php -r '
+            $next_extension_id = 1; $installed_extensions = array();
+            include "/tmp/fa-dev-extensions.php";
+            $n = max((int) $next_extension_id, count($installed_extensions) ? max(array_keys($installed_extensions)) + 1 : 1);
+            $f = "/var/www/html/installed_extensions.php";
+            file_put_contents($f, preg_replace("/next_extension_id = \\d+/", "next_extension_id = $n", file_get_contents($f)));'
+    fi
+    activate_all
+    docker exec "$CONTAINER" sh -c 'mkdir -p /var/lib/fa-dev && date > /var/lib/fa-dev/created'
 }
 
 report() {
@@ -204,6 +277,15 @@ cmd_up() {
             ci_diagnostics "$CONTAINER"
             die "$CONTAINER did not become ready"
         fi
+        if ! docker exec "$CONTAINER" test -f /var/lib/fa-dev/created; then
+            log "creating $CONTAINER did not finish; finishing it: dataset, extension ids, modules (its mounts, themes, port and image stay as created)"
+            check_inputs
+            keep_on_failure
+            finish_creation "$(label fresh)"
+            trap - EXIT
+            report
+            return
+        fi
         log "$CONTAINER exists: its mounts, themes, port, image and dataset stay as created (destroy --yes to change them); applying FA_DEV_MODULES"
         cmd_link
         report
@@ -211,20 +293,8 @@ cmd_up() {
     fi
 
     case "$FA_DEV_PORT" in ''|*[!0-9]*) die "FA_DEV_PORT takes a number, not '$FA_DEV_PORT'" ;; esac
-    local dataset_file=''
-    case "$FA_DEV_DATASET" in
-        test|demo) ;;
-        *)
-            [ -f "$FA_DEV_DATASET" ] || { printf 'plugin-dev.sh: no such dataset file: %s\n' "$FA_DEV_DATASET" >&2; exit 2; }
-            dataset_file="$(cd "$(dirname "$FA_DEV_DATASET")" && pwd)/$(basename "$FA_DEV_DATASET")" ;;
-    esac
-    [ -z "$FA_DEV_EXTENSIONS" ] || [ -f "$FA_DEV_EXTENSIONS" ] \
-        || { printf 'plugin-dev.sh: no such file: %s\n' "$FA_DEV_EXTENSIONS" >&2; exit 2; }
-    [ -d "$FA_DEV_MODULES_ROOT" ] || die "FA_DEV_MODULES_ROOT is not a directory: $FA_DEV_MODULES_ROOT"
+    check_inputs
     local m t
-    for m in $FA_DEV_MODULES; do
-        [ -f "$(module_source "$m")/hooks.php" ] || die "FA_DEV_MODULES lists $m, but $(module_source "$m") has no hooks.php"
-    done
     for t in $FA_DEV_THEMES; do
         [ -d "$FA_DEV_THEMES_ROOT/$t" ] || die "FA_DEV_THEMES lists $t, but $FA_DEV_THEMES_ROOT/$t is not a directory"
     done
@@ -232,41 +302,22 @@ cmd_up() {
         die "port $FA_DEV_PORT is already in use on this machine; set FA_DEV_PORT to another"
     fi
 
-    local run_args=(-p "127.0.0.1:$FA_DEV_PORT:80" -v "$VOLUME:/var/lib/mysql"
-                    -v "$(cd "$FA_DEV_MODULES_ROOT" && pwd):$FA/modules"
-                    --label "fa-dev.port=$FA_DEV_PORT" --label "fa-dev.dataset=$FA_DEV_DATASET")
-    for t in $FA_DEV_THEMES; do run_args+=(-v "$(cd "$FA_DEV_THEMES_ROOT/$t" && pwd):$FA/themes/$t"); done
-    for m in $FA_DEV_MOUNTS; do run_args+=(-v "$m"); done
-
     local fresh=yes
     if docker volume inspect "$VOLUME" >/dev/null 2>&1; then
         fresh=no
         log "keeping the database already in $VOLUME"
     fi
 
-    # From here on a failure keeps the environment for inspection.
-    # shellcheck disable=SC2154 # rc is assigned inside the trap
-    trap 'rc=$?; if [ "$rc" -ne 0 ]; then [ "${CI_DIAGNOSED:-}" = yes ] || ci_diagnostics "$CONTAINER"; log "$CONTAINER kept for inspection: plugin-dev.sh --env $ENV_NAME logs | shell | activate | destroy --yes"; fi' EXIT
+    local run_args=(-p "127.0.0.1:$FA_DEV_PORT:80" -v "$VOLUME:/var/lib/mysql"
+                    -v "$(cd "$FA_DEV_MODULES_ROOT" && pwd):$FA/modules"
+                    --label "fa-dev.port=$FA_DEV_PORT" --label "fa-dev.dataset=$FA_DEV_DATASET"
+                    --label "fa-dev.fresh=$fresh")
+    for t in $FA_DEV_THEMES; do run_args+=(-v "$(cd "$FA_DEV_THEMES_ROOT/$t" && pwd):$FA/themes/$t"); done
+    for m in $FA_DEV_MOUNTS; do run_args+=(-v "$m"); done
+
+    keep_on_failure
     ci_boot "$CONTAINER" "$FA_DEV_IMAGE" "${run_args[@]}"
-    if [ "$fresh" = yes ] && [ -n "$dataset_file" ]; then
-        log "dataset: $dataset_file"
-        docker cp "$dataset_file" "$CONTAINER:/tmp/fa-dev-dataset.${dataset_file##*.}"
-        docker exec "$CONTAINER" fa-ci-dataset "/tmp/fa-dev-dataset.${dataset_file##*.}"
-    elif [ "$fresh" = yes ] && [ "$FA_DEV_DATASET" != test ]; then
-        log "dataset: $FA_DEV_DATASET"
-        docker exec "$CONTAINER" fa-ci-dataset "$FA_DEV_DATASET"
-    fi
-    if [ -n "$FA_DEV_EXTENSIONS" ]; then
-        # Modules the site's list doesn't have get ids after every id it has used.
-        docker cp "$FA_DEV_EXTENSIONS" "$CONTAINER:/tmp/fa-dev-extensions.php"
-        docker exec -u www-data "$CONTAINER" php -r '
-            $next_extension_id = 1; $installed_extensions = array();
-            include "/tmp/fa-dev-extensions.php";
-            $n = max((int) $next_extension_id, count($installed_extensions) ? max(array_keys($installed_extensions)) + 1 : 1);
-            $f = "/var/www/html/installed_extensions.php";
-            file_put_contents($f, preg_replace("/next_extension_id = \\d+/", "next_extension_id = $n", file_get_contents($f)));'
-    fi
-    activate_all
+    finish_creation "$fresh"
     trap - EXIT
     report
 }
@@ -289,7 +340,7 @@ main() {
         shell)
             require_env
             docker exec -it -w "$FA" -e HOME=/tmp "$CONTAINER" \
-                setpriv --reuid="$(id -u)" --regid="$(id -g)" --groups=33 bash ;;
+                setpriv --reuid="$(id -u)" --regid="$(id -g)" --groups=33 bash -c 'umask 002; exec bash' ;;
         exec)
             require_env
             local dir="$FA"
@@ -323,8 +374,7 @@ main() {
                 load)
                     [ -f "${2:-}" ] || { printf 'plugin-dev.sh: no such file: %s\n' "${2:-}" >&2; exit 2; }
                     load_config
-                    docker cp "$2" "$CONTAINER:/tmp/fa-dev-dataset.${2##*.}"
-                    docker exec "$CONTAINER" fa-ci-dataset "/tmp/fa-dev-dataset.${2##*.}"
+                    load_dataset "$2"
                     activate_all ;;
                 shell) docker exec -it "$CONTAINER" mariadb fa_test ;;
                 *) die "usage: plugin-dev.sh [--env NAME] db dump [file] | db load <file> | db shell" ;;

@@ -31,10 +31,10 @@ SH
 export FA_DEV_MODULES_ROOT="$mods"
 
 free_port() { python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
-env_a="citest$$a"; env_b="citest$$b"; env_c="citest$$c"; env_e="citest$$e"
-port_a="$(free_port)"; port_c="$(free_port)"; port_e="$(free_port)"
+env_a="citest$$a"; env_b="citest$$b"; env_c="citest$$c"; env_e="citest$$e"; env_f="citest$$f"
+port_a="$(free_port)"; port_c="$(free_port)"; port_e="$(free_port)"; port_f="$(free_port)"
 cleanup() {
-    for e in "$env_a" "$env_b" "$env_c" "$env_e"; do
+    for e in "$env_a" "$env_b" "$env_c" "$env_e" "$env_f"; do
         docker rm -f "fa-dev-$e" >/dev/null 2>&1 || true
         docker volume rm "fa-dev-$e-db" >/dev/null 2>&1 || true
     done
@@ -81,6 +81,13 @@ expect_status 0 "link applies it again" dev_a link
 expect_status 0 "reads the lists" state "$env_a"
 expect_contains "ci_beta on again" "ci_beta@2=on" "$OUT"
 expect_status 0 "the same container" test "$(docker inspect -f '{{.Id}}' "fa-dev-$env_a")" = "$id_before"
+printf 'FA_DEV_MODULES="ci_alpha"\nFA_DEV_PORT=1\n' > "$cfg_a"
+expect_status 0 "activate with a smaller list" dev_a activate
+expect_status 0 "reads the lists" state "$env_a"
+expect_contains "deactivates what it no longer lists" "ci_beta@2=off" "$OUT"
+expect_status 0 "status" "$d" --env "$env_a" status
+expect_absent "no longer listing it" "ci_beta" "$OUT"
+printf 'FA_DEV_MODULES="ci_alpha ci_beta"\nFA_DEV_PORT=1\n' > "$cfg_a"
 
 expect_status 0 "a row to keep" sqlq "$env_a" "INSERT INTO 0_ci_alpha (marker) VALUES (CONCAT('kept', '-across-restarts'))"
 expect_status 0 "down stops it" "$d" --env "$env_a" down
@@ -140,6 +147,22 @@ expect_status 0 "a backup as the dataset" env FA_DEV_MODULES=ci_alpha FA_DEV_POR
 expect_status 0 "with the backup's data" sqlq "$env_e" "SELECT marker FROM 0_ci_alpha_aside"
 expect_contains "the dumped row" "in-the-dump" "$OUT"
 expect_status 0 "destroy it" "$d" --env "$env_e" destroy --yes
+
+printf 'THIS IS NOT SQL;\n' > "$TMP_A/f.sql"
+dev_f() { FA_DEV_MODULES=ci_alpha FA_DEV_PORT="$port_f" FA_DEV_DATASET="$TMP_A/f.sql" "$d" --env "$env_f" "$@"; }
+expect_status 1 "a backup that won't load fails the creation" dev_f up
+expect_status 0 "leaving it unfinished" sh -c "! docker exec fa-dev-$env_f test -f /var/lib/fa-dev/created"
+gunzip -c "$TMP_A/dump.sql.gz" > "$TMP_A/f.sql"
+expect_status 0 "up again, the backup fixed, finishes creating it" dev_f up
+expect_contains "saying so" "did not finish" "$OUT"
+expect_status 0 "with the backup's data" sqlq "$env_f" "SELECT marker FROM 0_ci_alpha_aside"
+expect_contains "the dumped row" "in-the-dump" "$OUT"
+expect_status 0 "and its modules" state "$env_f"
+expect_contains "ci_alpha on" "ci_alpha@1=on" "$OUT"
+expect_status 0 "marked created" docker exec "fa-dev-$env_f" test -f /var/lib/fa-dev/created
+expect_status 0 "up once more takes the usual path" dev_f up
+expect_contains "stays as created" "stay as created" "$OUT"
+expect_status 0 "destroy it" "$d" --env "$env_f" destroy --yes
 expect_status 2 "a missing backup is refused before anything starts" env FA_DEV_MODULES=ci_alpha FA_DEV_PORT="$port_e" FA_DEV_DATASET="$TMP_A/nope.sql" "$d" --env "$env_e" up
 expect_status 0 "and nothing was created" sh -c "! docker inspect fa-dev-$env_e >/dev/null 2>&1"
 
