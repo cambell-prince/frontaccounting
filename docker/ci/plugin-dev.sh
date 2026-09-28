@@ -216,12 +216,13 @@ load_dataset() {
 }
 
 # What creation needs from this machine, checked before anything starts:
-# the dataset and extension list files, and each listed module's hooks.php.
+# the dataset file (when it will be loaded: $1 = yes), the extension list
+# file, and each listed module's hooks.php.
 check_inputs() {
     local m
-    case "$FA_DEV_DATASET" in
-        test|demo) ;;
-        *) [ -f "$FA_DEV_DATASET" ] || { printf 'plugin-dev.sh: no such dataset file: %s\n' "$FA_DEV_DATASET" >&2; exit 2; } ;;
+    case "$1:$FA_DEV_DATASET" in
+        yes:test|yes:demo) ;;
+        yes:*) [ -f "$FA_DEV_DATASET" ] || { printf 'plugin-dev.sh: no such dataset file: %s\n' "$FA_DEV_DATASET" >&2; exit 2; } ;;
     esac
     [ -z "$FA_DEV_EXTENSIONS" ] || [ -f "$FA_DEV_EXTENSIONS" ] \
         || { printf 'plugin-dev.sh: no such file: %s\n' "$FA_DEV_EXTENSIONS" >&2; exit 2; }
@@ -249,13 +250,17 @@ finish_creation() {
         esac
     fi
     if [ -n "$FA_DEV_EXTENSIONS" ]; then
-        # Modules the site's list doesn't have get ids after every id it has used.
+        # Modules the site's list doesn't have get ids after every id it has
+        # used, and after any a creation that didn't finish already gave out.
         docker cp "$FA_DEV_EXTENSIONS" "$CONTAINER:/tmp/fa-dev-extensions.php"
         docker exec -u www-data "$CONTAINER" php -r '
-            $next_extension_id = 1; $installed_extensions = array();
-            include "/tmp/fa-dev-extensions.php";
-            $n = max((int) $next_extension_id, count($installed_extensions) ? max(array_keys($installed_extensions)) + 1 : 1);
+            function fa_dev_next($file) {
+                $next_extension_id = 1; $installed_extensions = array();
+                include $file;
+                return max((int) $next_extension_id, count($installed_extensions) ? max(array_keys($installed_extensions)) + 1 : 1);
+            }
             $f = "/var/www/html/installed_extensions.php";
+            $n = max(fa_dev_next("/tmp/fa-dev-extensions.php"), fa_dev_next($f));
             file_put_contents($f, preg_replace("/next_extension_id = \\d+/", "next_extension_id = $n", file_get_contents($f)));'
     fi
     activate_all
@@ -279,9 +284,11 @@ cmd_up() {
         fi
         if ! docker exec "$CONTAINER" test -f /var/lib/fa-dev/created; then
             log "creating $CONTAINER did not finish; finishing it: dataset, extension ids, modules (its mounts, themes, port and image stay as created)"
-            check_inputs
+            local fresh
+            fresh="$(label fresh)"
+            check_inputs "$fresh"
             keep_on_failure
-            finish_creation "$(label fresh)"
+            finish_creation "$fresh"
             trap - EXIT
             report
             return
@@ -293,7 +300,7 @@ cmd_up() {
     fi
 
     case "$FA_DEV_PORT" in ''|*[!0-9]*) die "FA_DEV_PORT takes a number, not '$FA_DEV_PORT'" ;; esac
-    check_inputs
+    check_inputs yes
     local m t
     for t in $FA_DEV_THEMES; do
         [ -d "$FA_DEV_THEMES_ROOT/$t" ] || die "FA_DEV_THEMES lists $t, but $FA_DEV_THEMES_ROOT/$t is not a directory"

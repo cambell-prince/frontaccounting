@@ -31,10 +31,10 @@ SH
 export FA_DEV_MODULES_ROOT="$mods"
 
 free_port() { python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
-env_a="citest$$a"; env_b="citest$$b"; env_c="citest$$c"; env_e="citest$$e"; env_f="citest$$f"
-port_a="$(free_port)"; port_c="$(free_port)"; port_e="$(free_port)"; port_f="$(free_port)"
+env_a="citest$$a"; env_b="citest$$b"; env_c="citest$$c"; env_e="citest$$e"; env_f="citest$$f"; env_g="citest$$g"
+port_a="$(free_port)"; port_c="$(free_port)"; port_e="$(free_port)"; port_f="$(free_port)"; port_g="$(free_port)"
 cleanup() {
-    for e in "$env_a" "$env_b" "$env_c" "$env_e" "$env_f"; do
+    for e in "$env_a" "$env_b" "$env_c" "$env_e" "$env_f" "$env_g"; do
         docker rm -f "fa-dev-$e" >/dev/null 2>&1 || true
         docker volume rm "fa-dev-$e-db" >/dev/null 2>&1 || true
     done
@@ -163,6 +163,25 @@ expect_status 0 "marked created" docker exec "fa-dev-$env_f" test -f /var/lib/fa
 expect_status 0 "up once more takes the usual path" dev_f up
 expect_contains "stays as created" "stay as created" "$OUT"
 expect_status 0 "destroy it" "$d" --env "$env_f" destroy --yes
+
+# A resumed creation with a live site's ids: the first attempt gives ci_gamma
+# an id (12) and ci_broken the next before failing; the second, with a module
+# added, must not hand out 12 again. Its database volume was already there,
+# so its dataset file isn't loaded and needn't exist any more.
+mkdir -p "$mods/ci_delta"
+# shellcheck disable=SC2016 # PHP, not the shell
+printf '<?php\nclass hooks_ci_delta extends hooks\n{\n\tvar $module_name = "ci_delta";\n}\n' > "$mods/ci_delta/hooks.php"
+docker volume create "fa-dev-$env_g-db" >/dev/null
+printf 'THIS IS NOT SQL;\n' > "$TMP_A/g.sql"
+dev_g() { local m="$1"; shift; FA_DEV_MODULES="$m" FA_DEV_PORT="$port_g" FA_DEV_DATASET="$TMP_A/g.sql" FA_DEV_EXTENSIONS="$TMP_A/live-extensions.php" "$d" --env "$env_g" "$@"; }
+expect_status 1 "a creation that fails after an unlisted module got its id" dev_g "ci_alpha ci_gamma ci_broken" up
+rm -f "$TMP_A/g.sql"
+expect_status 0 "up again finishes it, the unloaded dataset file gone" dev_g "ci_alpha ci_gamma ci_delta" up
+expect_contains "saying so" "did not finish" "$OUT"
+expect_status 0 "reads the lists" state "$env_g"
+expect_contains "ci_gamma keeps 12" "ci_gamma@12=on" "$OUT"
+expect_contains "ci_delta gets an id after every one given out" "ci_delta@14=on" "$OUT"
+expect_status 0 "destroy it" "$d" --env "$env_g" destroy --yes
 expect_status 2 "a missing backup is refused before anything starts" env FA_DEV_MODULES=ci_alpha FA_DEV_PORT="$port_e" FA_DEV_DATASET="$TMP_A/nope.sql" "$d" --env "$env_e" up
 expect_status 0 "and nothing was created" sh -c "! docker inspect fa-dev-$env_e >/dev/null 2>&1"
 
