@@ -1,0 +1,15 @@
+[
+  {"id": 1,  "created_at": "2026-09-05T00:00:00Z", "metadata": {"container": {"tags": ["cp-php7.4", "cp-php7.4-aaaaaaa"]}}},
+  {"id": 2,  "created_at": "2026-09-04T00:00:00Z", "metadata": {"container": {"tags": ["cp-php7.4-bbbbbbb"]}}},
+  {"id": 3,  "created_at": "2026-09-03T00:00:00Z", "metadata": {"container": {"tags": ["cp-php7.4-ccccccc"]}}},
+  {"id": 4,  "created_at": "2026-09-02T00:00:00Z", "metadata": {"container": {"tags": ["cp-php7.4-ddddddd"]}}},
+  {"id": 5,  "created_at": "2026-09-01T00:00:00Z", "metadata": {"container": {"tags": ["cp-php7.4-eeeeeee"]}}},
+  {"id": 6,  "created_at": "2026-09-05T00:00:00Z", "metadata": {"container": {"tags": ["upstream-php8.3", "upstream-php8.3-aaaaaaa"]}}},
+  {"id": 7,  "created_at": "2026-09-01T00:00:00Z", "metadata": {"container": {"tags": ["upstream-php8.3-fffffff"]}}},
+  {"id": 8,  "created_at": "2026-09-01T00:00:00Z", "metadata": {"container": {"tags": []}}},
+  {"id": 9,  "created_at": "2026-09-03T00:00:00Z", "metadata": {"container": {"tags": ["pr-17-cp-php7.4"]}}},
+  {"id": 10, "created_at": "2026-09-02T00:00:00Z", "metadata": {"container": {"tags": ["pr-18-cp-php7.4"]}}},
+  {"id": 11, "created_at": "2026-09-02T00:00:00Z", "metadata": {"container": {"tags": ["pr-18-upstream-php8.3"]}}},
+  {"id": 12, "created_at": "2026-08-31T00:00:00Z", "metadata": {"container": {"tags": ["cp-php7.4-9999999"]}}},
+  {"id": 13, "created_at": "2026-08-01T00:00:00Z", "metadata": {"container": {"tags": ["latest"]}}}
+]
