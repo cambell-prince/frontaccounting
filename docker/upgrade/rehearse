@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Rehearse the 2.4.3 (master-ark) -> 2.4.20 upgrade on a copy of the live
+# database, in the docker/fa stack. See README.md beside this file.
+#
+#   docker/upgrade/rehearse load <backup.sql[.gz]>   restore the backup (replaces the stack's db)
+#   docker/upgrade/rehearse check                    read-only pre-flight report
+#   docker/upgrade/rehearse migrate                  core prefs + extension schemas, idempotent
+#   docker/upgrade/rehearse all <backup>             load, check, migrate, check
+#
+# PREFIX (default: DB_PREFIX from docker/.env, else 0_) picks the company's
+# table set when the backup holds more than one.
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$HERE/../.." && pwd)"
+FA="$ROOT/docker/fa"
+
+if [ -z "${PREFIX:-}" ]; then
+    PREFIX="$(sed -n 's/^DB_PREFIX=//p' "$ROOT/docker/.env" 2>/dev/null | tr -d '"'\''')"
+    PREFIX="${PREFIX:-0_}"
+fi
+
+info() { printf '\033[36m==>\033[0m %s\n' "$*"; }
+die() { printf '\033[31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# SQL written for 0_, rewritten for PREFIX (quoted identifiers and string literals).
+with_prefix() { sed -e "s/\`0_/\`$PREFIX/g" -e "s/'0_/'$PREFIX/g" "$@"; }
+sql() { "$FA" mysql -t "$@"; }
+scalar() { "$FA" mysql -N -B -e "$1"; }
+
+table_exists() {
+    [ "$(scalar "SELECT COUNT(*) FROM information_schema.tables
+                 WHERE table_schema = DATABASE() AND table_name = '$PREFIX$1'")" = 1 ]
+}
+column_nullable() {
+    [ "$(scalar "SELECT is_nullable FROM information_schema.columns
+                 WHERE table_schema = DATABASE() AND table_name = '$PREFIX$1' AND column_name = '$2'")" = YES ]
+}
+
+cmd_load() {
+    [ -n "${1:-}" ] || die "usage: rehearse load <backup.sql[.gz]>"
+    "$FA" db reset "$1"
+}
+
+cmd_check() {
+    info "pre-flight ($PREFIX)"
+    with_prefix "$HERE/00-preflight.sql" | sql
+    if table_exists sales_recurring; then
+        info "orders with more than one sgw_sales schedule (must be empty before sgw_sales 1.4)"
+        sql -e "SELECT trans_no, COUNT(*) AS schedules FROM \`${PREFIX}sales_recurring\`
+                GROUP BY trans_no HAVING schedules > 1"
+    fi
+}
+
+# Applies a module's update file with FA's prefix substitution, as
+# hooks::update_databases() -> db_import() would.
+apply() {
+    info "applying $1"
+    with_prefix "$ROOT/$1" | "$FA" mysql
+}
+
+cmd_migrate() {
+    info "core: 2.4.20 company preferences"
+    with_prefix "$HERE/10-core-2.4.20.sql" | "$FA" mysql
+
+    # The same files, and the same checks, as each module's activate_extension().
+    table_exists sales_recurring || apply modules/sgw_sales/sql/update_1.0.sql
+    if column_nullable sales_recurring dt_next; then
+        info "sgw_sales update_1.4.sql already applied"
+    else
+        dups="$(scalar "SELECT COUNT(*) FROM (SELECT trans_no FROM \`${PREFIX}sales_recurring\`
+                        GROUP BY trans_no HAVING COUNT(*) > 1) d")"
+        [ "$dups" = 0 ] || die "$dups order(s) have more than one sgw_sales schedule — resolve them first ('rehearse check' lists them)"
+        apply modules/sgw_sales/sql/update_1.4.sql
+    fi
+    table_exists graphql_refresh_token || apply modules/graphql/sql/update_1.0.sql
+    table_exists graphql_machine_token || apply modules/graphql/sql/update_1.1.sql
+    info "migrated"
+}
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+    load) cmd_load "$@" ;;
+    check) cmd_check ;;
+    migrate) cmd_migrate ;;
+    all) cmd_load "$@"; cmd_check; cmd_migrate; cmd_check ;;
+    *) sed -n '2,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+esac
