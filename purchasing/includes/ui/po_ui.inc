@@ -166,7 +166,7 @@ function display_po_header(&$order)
 	if ($order->trans_type==ST_SUPPINVOICE)
 		date_row(_("Due Date:"), 'due_date', '', false, 0, 0, 0, null, true);
 
-  	text_row(_("Supplier's Reference:"), 'supp_ref', null, 16, 15);
+  	text_row(_("Supplier's Reference:"), 'supp_ref', null, 20, 60);
 
 	if (get_company_pref('use_dimension'))
 		dimensions_list_row(_('Dimension').':', 'dimension', null, true, _('Default'), false, 1);
@@ -211,11 +211,15 @@ function display_po_items(&$order, $editable=true)
     div_start('items_table');
     start_table(TABLESTYLE, "width='80%'");
 
-   	$th = array(_("Item Code"), _("Item Description"), _("Quantity"),
-		_("Received"), _("Unit"),
-   		_("Required Delivery Date"), $order->tax_included ? _("Price after Tax") : _("Price before Tax"), _("Line Total"), "");
+	$new = $order->order_no == 0;
+
+   	$th = array(_("Item Code"), _("Item Description"), _("Quantity"), _("Received"),
+   		_("Unit"), _("Required Delivery Date"), $order->tax_included ? _("Price after Tax") : _("Price before Tax"), _("Line Total"), "");
+
 	if ($order->trans_type != ST_PURCHORDER)
 		array_remove($th, 5);
+	if ($new)
+		array_remove($th, 3);
 
 	if (count($order->line_items)) $th[] = '';
 
@@ -236,8 +240,8 @@ function display_po_items(&$order, $editable=true)
     		    label_cell(1);
          	else
             	qty_cell($po_line->quantity, false, get_qty_dec($po_line->stock_id));
-
-            qty_cell($po_line->qty_received, false, get_qty_dec($po_line->stock_id));
+			if (!$new)
+	            qty_cell($po_line->qty_received, false, get_qty_dec($po_line->stock_id));
     		label_cell($po_line->units);
 			if ($order->trans_type == ST_PURCHORDER)
         	    label_cell($po_line->req_del_date);
@@ -353,8 +357,9 @@ function po_item_controls(&$order, &$rowcounter, $line_no=-1)
    global $Ajax, $SysPrefs;
 
 	alt_table_row_color($rowcounter);
+	$new = $order->order_no == 0;
 
-	$dec2 = 0;
+	$dec2 = 6;
 	$id = find_submit('Edit');
 	if (($id != -1) && $line_no == $id)
 	{
@@ -398,10 +403,13 @@ function po_item_controls(&$order, &$rowcounter, $line_no=-1)
 			    $Ajax->activate('req_del_date');
 			    $Ajax->activate('line_total');
 		}
-    	$item_info = get_item_edit_info($_POST['stock_id']);
-		$_POST['units'] = $item_info["units"];
 
-   		$dec = $item_info["decimals"];
+		$dec = 0; $_POST['units'] = '';
+    	$item_info = get_item_edit_info($_POST['stock_id']);
+    	if ($item_info) {
+			$_POST['units'] = $item_info["units"];
+	   		$dec = $item_info["decimals"];
+	   	}
    		$_POST['qty'] =	number_format2(get_purchase_conversion_factor ($order->supplier_id, $_POST['stock_id']), $dec);
 		$_POST['price'] = price_decimal_format(get_purchase_price ($order->supplier_id, $_POST['stock_id']), $dec2);
 		if ($order->trans_type == ST_PURCHORDER)
@@ -415,7 +423,8 @@ function po_item_controls(&$order, &$rowcounter, $line_no=-1)
 	} else
 		qty_cells(null, 'qty', null, null, null, $dec);
 
-	qty_cell($qty_rcvd, false, $dec);
+	if (!$new)
+		qty_cell($qty_rcvd, false, $dec);
 
 	label_cell($_POST['units'], '', 'units');
 	if ($order->trans_type == ST_PURCHORDER)
@@ -426,7 +435,7 @@ function po_item_controls(&$order, &$rowcounter, $line_no=-1)
    		hidden('price', $_POST['price']);
    	}	
    	else	
-		amount_cells(null, 'price', null, null, null, $dec2);
+		unit_amount_cells(null, 'price');
 
 	$line_total = round(input_num('qty') * input_num('price'),  user_price_dec());
 	amount_cell($line_total, false, '','line_total');

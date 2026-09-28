@@ -62,6 +62,8 @@ if (isset($_GET['AddedID'])) {
 
 	hyperlink_params("$path_to_root/sales/inquiry/sales_orders_view.php", _("Select Another Order For Dispatch"), "OutstandingOnly=1");
 
+	hyperlink_params("$path_to_root/admin/attachments.php", _("Add an Attachment"), "filterType=".ST_CUSTDELIVERY."&trans_no=$dispatch_no");
+
 	display_footer_exit();
 
 } elseif (isset($_GET['UpdatedID'])) {
@@ -253,7 +255,8 @@ function check_quantities()
 				$max = $itm->quantity;
 			} else {
 				$min = 0;
-				$max = $itm->quantity - $itm->qty_done;
+				// Fixing floating point problem in PHP.
+				$max = round2($itm->quantity - $itm->qty_done, get_qty_dec($itm->stock_id));
 			}
 
 			if (check_num('Line'.$line, $min, $max)) {
@@ -263,7 +266,6 @@ function check_quantities()
 				set_focus('Line'.$line);
 				$ok = 0;
 			}
-
 		}
 
 		if (isset($_POST['Line'.$line.'Desc'])) {

@@ -177,6 +177,17 @@ require_once(dirname(__FILE__)."/barcodes.php");
  */
 require_once(dirname(__FILE__)."/html_entity_decode_php4.php");
 
+//
+// Check image file format against specific TCPDF engine requirements.
+//
+function check_image_file($filename)
+{
+	$test = new TCPDF();
+	if ( !$test->Image($filename, 0, 0) )
+		return _('Unsupported image file format.');
+	return '';
+}
+
 if (!class_exists('TCPDF')) {
 	/**
 	 * define default PDF document producer
@@ -198,6 +209,12 @@ if (!class_exists('TCPDF')) {
 		// protected or Protected properties
 
 		/**
+        * @var cell binary padding
+        * @access protected
+        */
+        var $padding;
+
+        /**
 		* @var current page number
 		* @access protected
 		*/
@@ -613,7 +630,7 @@ if (!class_exists('TCPDF')) {
 		 * @var Header font.
 		 * @access protected
 		 */
-		var $header_font;
+		var $header_font = array('helvetica', '', 12);
 
 		/**
 		 * @var Footer font.
@@ -1124,7 +1141,8 @@ if (!class_exists('TCPDF')) {
 				mb_internal_encoding("ASCII");
 			}
 			// set language direction
-			$this->rtl = $this->l['a_meta_dir']=='rtl' ? true : false;
+
+			$this->rtl = @$this->l['a_meta_dir']=='rtl' ? true : false;
 			$this->tmprtl = false;
 			//Some checks
 			$this->_dochecks();
@@ -3520,6 +3538,8 @@ if (!class_exists('TCPDF')) {
 		function unichr($c) {
 			if (!$this->isunicode) {
 				return chr($c);
+			} elseif ($c == '') {
+				return '';
 			} elseif ($c <= 0x7F) {
 				// one byte
 				return chr($c);
@@ -3704,6 +3724,7 @@ if (!class_exists('TCPDF')) {
 				}
 			}
 			$this->endlinex = $this->img_rb_x;
+			return $info;
 		}
 
 		/**
@@ -4690,7 +4711,7 @@ if (!class_exists('TCPDF')) {
 		function _putimages() {
 			$filter = ($this->compress) ? '/Filter /FlateDecode ' : '';
 			reset($this->images);
-			while (list($file, $info) = each($this->images)) {
+			foreach ($this->images as $file => $info) {
 				$this->_newobj();
 				$this->images[$file]['n'] = $this->n;
 				$this->_out('<</Type /XObject');
@@ -5731,10 +5752,7 @@ if (!class_exists('TCPDF')) {
 		 * @return string converted
 		 */
 		function unhtmlentities($text_to_convert) {
-			if (!$this->isunicode) {
-				return html_entity_decode($text_to_convert, ENT_QUOTES);
-			}
-			return html_entity_decode_php4($text_to_convert);
+			return html_entity_decode($text_to_convert, ENT_QUOTES, $this->encoding);
 		}
 
 		// ENCRYPTION METHODS ----------------------------------
@@ -7765,7 +7783,7 @@ if (!class_exists('TCPDF')) {
 			$k = $this->k;
 			$this->javascript .= sprintf("f".$name."=this.addField('%s','%s',%d,[%.2f,%.2f,%.2f,%.2f]);", $name, $type, $this->PageNo()-1, $x*$k, ($this->h-$y)*$k+1, ($x+$w)*$k, ($this->h-$y-$h)*$k+1)."\n";
 			$this->javascript .= "f".$name.".textSize=".$this->FontSizePt.";\n";
-			while (list($key, $val) = each($prop)) {
+			foreach ($prop as $key => $val) {
 				if (strcmp(substr($key,-5),"Color") == 0) {
 					$val = $this->_JScolor($val);
 				} else {
@@ -9239,7 +9257,7 @@ if (!class_exists('TCPDF')) {
 						// get attributes
 						preg_match_all('/([^=\s]*)=["\']?([^"\']*)["\']?/', $element, $attr_array, PREG_PATTERN_ORDER);
 						$dom[$key]['attribute'] = array(); // reset attribute array
-						while (list($id, $name) = each($attr_array[1])) {
+						foreach ($attr_array[1] as $id => $name) {
 							$dom[$key]['attribute'][strtolower($name)] = $attr_array[2][$id];
 						}
 						// split style attributes
@@ -9247,7 +9265,7 @@ if (!class_exists('TCPDF')) {
 							// get style attributes
 							preg_match_all('/([^:\s]*):([^;]*)/', $dom[$key]['attribute']['style'], $style_array, PREG_PATTERN_ORDER);
 							$dom[$key]['style'] = array(); // reset style attribute array
-							while (list($id, $name) = each($style_array[1])) {
+							foreach ($style_array[1] as $id => $name) {
 								$dom[$key]['style'][strtolower($name)] = trim($style_array[2][$id]);
 							}
 							// --- get some style attributes ---

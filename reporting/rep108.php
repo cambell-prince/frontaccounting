@@ -30,18 +30,31 @@ print_statements();
 
 //----------------------------------------------------------------------------------------------------
 
-function getTransactions($debtorno, $date, $show_also_allocated)
+function getTransactions($debtorno, $show_also_allocated)
 {
-    $sql = "SELECT *,
-    			(ov_amount + ov_gst + ov_freight + ov_freight_tax + ov_discount) AS TotalAmount, alloc AS Allocated,
-				((type = ".ST_SALESINVOICE.") AND due_date < '$date') AS OverDue
-			FROM ".TB_PREF."debtor_trans
-			WHERE tran_date <= '$date' AND debtor_no = ".db_escape($debtorno)."
-   				AND type <> ".ST_CUSTDELIVERY."
-				AND ABS(ov_amount + ov_gst + ov_freight + ov_freight_tax + ov_discount) > ". FLOAT_COMP_DELTA;
+	$date = date('Y-m-d');
 
-	if (!$show_also_allocated)
-		$sql .= " AND ABS(ABS(ov_amount + ov_gst + ov_freight +	ov_freight_tax + ov_discount) - alloc) > ". FLOAT_COMP_DELTA;
+    $sql = "SELECT trans.type,
+        trans.trans_no,
+        trans.order_,
+        trans.reference,
+        trans.tran_date,
+        trans.due_date,
+        customer_ref,
+        IF(trans.prep_amount, trans.prep_amount, ov_amount + ov_gst + ov_freight + ov_freight_tax + ov_discount) AS TotalAmount,
+        trans.alloc AS Allocated,
+		((trans.type = ".ST_SALESINVOICE.") AND due_date < '$date') AS OverDue
+		FROM ".TB_PREF."debtor_trans trans
+		LEFT JOIN ".TB_PREF."voided as v
+            ON trans.trans_no=v.id AND trans.type=v.type
+        LEFT JOIN (SELECT customer_ref, order_no FROM ".TB_PREF."sales_orders WHERE trans_type=".ST_SALESORDER.") as ord
+            ON trans.order_=ord.order_no
+        WHERE tran_date <= '$date' AND debtor_no = ".db_escape($debtorno)."
+			AND trans.type <> ".ST_CUSTDELIVERY." AND ISNULL(v.date_)
+			AND ABS(ABS(ov_amount) + ov_gst + ov_freight + ov_freight_tax + ov_discount) > ". FLOAT_COMP_DELTA;
+	
+  	if (!$show_also_allocated)
+		$sql .= " AND ABS(IF(prep_amount, prep_amount, ABS(ov_amount) + ov_gst + ov_freight + ov_freight_tax + ov_discount) - alloc) > ". FLOAT_COMP_DELTA;
 	$sql .= " ORDER BY tran_date";
 
     return db_query($sql,"No transactions were returned");
@@ -65,11 +78,11 @@ function print_statements()
 	$orientation = ($orientation ? 'L' : 'P');
 	$dec = user_price_dec();
 
-	$cols = array(4, 100, 130, 190,	250, 320, 385, 450, 515);
+	$cols = array(4, 70, 120, 170, 280, 320, 360, 410, 460, 515);
 
 	//$headers in doctext.inc
 
-	$aligns = array('left',	'left',	'left',	'left',	'right', 'right', 'right', 'right');
+	$aligns = array('left',	'left',	'left',	'left', 'left',	'right', 'right', 'right', 'right');
 
 	$params = array('comments' => $comments);
 
@@ -77,8 +90,6 @@ function print_statements()
 	$PastDueDays1 = get_company_pref('past_due_days');
 	$PastDueDays2 = 2 * $PastDueDays1;
 
-	if ($email == 0)
-		$rep = new FrontReport(_('STATEMENT'), "StatementBulk", user_pagesize(), 9, $orientation);
     if ($orientation == 'L')
     	recalculate_cols($cols);
 
@@ -94,15 +105,16 @@ function print_statements()
 		if ($currency != ALL_TEXT && $myrow['curr_code'] != $currency) {
 			continue;
 		}	
-		$date = date('Y-m-d');
 
 		$myrow['order_'] = "";
 
-		$TransResult = getTransactions($myrow['debtor_no'], $date, $show_also_allocated);
+		$TransResult = getTransactions($myrow['debtor_no'], $show_also_allocated);
 		$baccount = get_default_bank_account($myrow['curr_code']);
 		$params['bankaccount'] = $baccount['id'];
 		if (db_num_rows($TransResult) == 0)
 			continue;
+        if ($email == 0 && !isset($rep))
+            $rep = new FrontReport(_('STATEMENT'), "StatementBulk", user_pagesize(), 9, $orientation);
 		if ($email == 1)
 		{
 			$rep = new FrontReport("", "", user_pagesize(), 9, $orientation);
@@ -130,20 +142,21 @@ function print_statements()
 		{
 			$DisplayTotal = number_format2(Abs($myrow2["TotalAmount"]),$dec);
 			$DisplayAlloc = number_format2($myrow2["Allocated"],$dec);
-			$DisplayNet = number_format2($myrow2["TotalAmount"] - $myrow2["Allocated"],$dec);
+			$DisplayNet = number_format2(Abs($myrow2["TotalAmount"]) - $myrow2["Allocated"],$dec);
 
 			$rep->TextCol(0, 1, $systypes_array[$myrow2['type']], -2);
 			$rep->TextCol(1, 2,	$myrow2['reference'], -2);
 			$rep->TextCol(2, 3,	sql2date($myrow2['tran_date']), -2);
+			$rep->TextCol(3, 4,	$myrow2['customer_ref'], -2);
 			if ($myrow2['type'] == ST_SALESINVOICE)
-				$rep->TextCol(3, 4,	sql2date($myrow2['due_date']), -2);
-			if ($myrow2['type'] == ST_SALESINVOICE || $myrow2['type'] == ST_BANKPAYMENT || 
-				($myrow2['type'] == ST_JOURNAL && $myrow2["TotalAmount"] > 0.0))
-				$rep->TextCol(4, 5,	$DisplayTotal, -2);
-			else
+				$rep->TextCol(4, 5,	sql2date($myrow2['due_date']), -2);
+			if ($myrow2['type'] == ST_SALESINVOICE || $myrow2['type'] == ST_BANKPAYMENT || ($myrow2['type'] == ST_JOURNAL && 
+				$myrow2["TotalAmount"] > 0))
 				$rep->TextCol(5, 6,	$DisplayTotal, -2);
-			$rep->TextCol(6, 7,	$DisplayAlloc, -2);
-			$rep->TextCol(7, 8,	$DisplayNet, -2);
+			else
+				$rep->TextCol(6, 7,	$DisplayTotal, -2);
+			$rep->TextCol(7, 8,	$DisplayAlloc, -2);
+			$rep->TextCol(8, 9,	$DisplayNet, -2);
 			$rep->NewLine();
 			if ($rep->row < $rep->bottomMargin + (10 * $rep->lineHeight))
 				$rep->NewPage();
@@ -167,10 +180,17 @@ function print_statements()
 		for ($i = 0; $i < 5; $i++)
 			$rep->TextWrap($col[$i], $rep->row, $col[$i + 1] - $col[$i], $str2[$i], 'right');
 		if ($email == 1)
-			$rep->End($email, _("Statement") . " " . _("as of") . " " . sql2date($date));
-
+		{
+            if (($CustomerRecord["Balance"]) != ($CustomerRecord["Balance"] - $CustomerRecord["Due"]))
+                $rep->End($email, _("Statement") . " " . _("as of") . " " . sql2date($date) . " " . _("from") . " " . htmlspecialchars_decode(get_company_pref('coy_name')));
+            else
+                display_notification(sprintf(_("Customer %s has no overdue debits. No e-mail is sent."), $myrow["DebtorName"]));       
+        }
 	}
-	if ($email == 0)
+
+    if (!isset($rep))
+        display_notification(_("No customers with outstanding balances found"));
+	else if ($email == 0)
 		$rep->End();
 }
 

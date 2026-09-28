@@ -49,7 +49,7 @@ class db_pager {
 	    $from,
 		$group,
 		$order;
-	var	$extra_where;
+	var	$extra_where = array();
 	
 	var $ready = false; // this var is false after change in sql before first
 						// and before first query.
@@ -349,7 +349,8 @@ class db_pager {
 			if ($result == false) 
 				return false;
 			$row = db_fetch_row($result);
-			$this->rec_count = $row[0];
+			$this->rec_count = is_array($row) ? $row[0] : 0;
+;
 	  		$this->max_page = $this->page_len ?
 				ceil($this->rec_count/$this->page_len) : 0;
 		

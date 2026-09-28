@@ -9,6 +9,8 @@
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
     See the License here <http://www.gnu.org/licenses/gpl-3.0.html>.
 ***********************************************************************/
+require_once($path_to_root. "/admin/db/attachments_db.inc");
+
 //---------------------------------------------------------------------------------------------
 function clear_dflt_curr_account($curr_code) {
 	  $sql = "UPDATE ".TB_PREF."bank_accounts SET dflt_curr_act=0 WHERE bank_curr_code="
@@ -60,6 +62,8 @@ function delete_bank_account($id)
 	$sql = "DELETE FROM ".TB_PREF."bank_accounts WHERE id=".db_escape($id);
 
 	db_query($sql,"could not delete bank account for $id");
+
+    delete_attachments(ST_BANKACCOUNT, $id);
 }
 
 
@@ -277,13 +281,15 @@ function get_ending_reconciled($bank_account, $bank_date)
 
 function get_sql_for_bank_account_reconcile($bank_account, $date)
 {
-	$sql = "SELECT	type, trans_no, ref, trans_date,
-				amount,	person_id, person_type_id, reconciled, id
-		FROM ".TB_PREF."bank_trans
+	$sql = "SELECT	bt.type, trans_no, ref, trans_date,
+				amount,	person_id, person_type_id, reconciled, bt.id, c.memo_
+		FROM ".TB_PREF."bank_trans bt
+		LEFT JOIN ".TB_PREF."comments c ON c.type = bt.type AND c.id = bt.trans_no
 		WHERE bank_act = ".db_escape($bank_account) . "
 			AND (reconciled IS NULL OR reconciled='". date2sql($date) ."')
-			AND amount != 0
-		ORDER BY trans_date, id";
+			AND amount != 0 AND trans_date <= '". date2sql($date) ."'
+		ORDER BY trans_date, bt.id";
+
 	return $sql;
 }
 

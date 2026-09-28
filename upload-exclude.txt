@@ -5,6 +5,7 @@
 .hgignore
 node_modules
 gulpfile.js
+docker
 composer.*
 package.json
 bower.json

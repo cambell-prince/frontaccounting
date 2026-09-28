@@ -83,6 +83,8 @@ class Cpdf extends FPDI {
 
 		if (!$code)
 			$code = $dflt_lang;
+		else
+			install_hooks($code);
 
 		$lang = array_search_value($code, $installed_languages, 'code');
 		$GetText->set_language($lang['code'], strtoupper($lang['encoding']));
@@ -306,17 +308,26 @@ class Cpdf extends FPDI {
 				$align = 'J';
 		}
 		else
-			$align = 'R';
+		{
+			if ($align == 'right')
+				$align = 'R';// This may need to be 'L'
+			elseif ($align == 'left')
+				$align = 'R';
+			elseif ($align == 'center')
+				$align = 'C';
+			elseif ($align == 'justify')
+				$align = 'J';
+		}
 
 		$txt = parent::unhtmlentities($txt);
 		// If horizontal scaling was requested, check to see if we're trying to scale
 		// too much.  If so, cut back string first and then scale it.
 		$maxScaleFactor = 1.4;
 		if ($stretch == 1 || $stretch == 2)
-	        $txt = $this->calcTextWrap($txt, $w * $maxScaleFactor, $spacebreak);
+			$txt = $this->calcTextWrap($txt, $w * $maxScaleFactor, $spacebreak);
 		// Wrap text if stretching isn't turned on
 		else
-	        $txt = $this->calcTextWrap($txt, $w, $spacebreak);
+			$txt = $this->calcTextWrap($txt, $w, $spacebreak);
 		$ret = $txt[1];
 		$txt = $txt[0];
 		$this->SetXY($xb, $this->h - $yb - $h);

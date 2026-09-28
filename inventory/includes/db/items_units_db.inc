@@ -43,12 +43,12 @@ function get_item_unit($unit)
 
 function get_unit_descr($unit)
 {
-	$sql = "SELECT description FROM ".TB_PREF."item_units WHERE abbr=".db_escape($unit);
+	$sql = "SELECT name FROM ".TB_PREF."item_units WHERE abbr=".db_escape($unit);
 
-	$result = db_query($sql, "could not unit description");
+	$result = db_query($sql, "could not retrieve unit description");
 
 	$row = db_fetch_row($result);
-	return $row[0];
+	return is_array($row) ? $row[0] : false;
 }
 
 function item_unit_used($unit) {
@@ -72,6 +72,6 @@ function get_unit_dec($stock_id)
 	$result = db_query($sql, "could not get unit decimals");
 
 	$row = db_fetch_row($result);
-	return $row[0];
+	return is_array($row) ? $row[0] : false;
 }
 

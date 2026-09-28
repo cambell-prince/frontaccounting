@@ -9,7 +9,7 @@
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
     See the License here <http://www.gnu.org/licenses/gpl-3.0.html>.
 ***********************************************************************/
-$page_security = 'SA_SALESANALYTIC';
+$page_security = 'SA_SUPPLIERANALYTIC';
 // ----------------------------------------------------------------
 // $ Revision:	2.0 $
 // Creator:	Joe Hunt
@@ -38,7 +38,7 @@ function getTransactions($category, $location, $fromsupp, $item, $from, $to)
 			item.stock_id,
 			item.description, item.inactive,
 			move.loc_code,
-			supplier.supplier_id,
+			supplier.supplier_id , IF(ISNULL(grn.rate), credit.rate, grn.rate) ex_rate,
 			supplier.supp_name AS supplier_name,
 			move.tran_date,
 			move.qty AS qty,
@@ -85,10 +85,7 @@ function get_supp_inv_reference($supplier_id, $stock_id, $date)
 		AND trans.tran_date=".db_escape($date);
     $result = db_query($sql,"No transactions were returned");
     $row = db_fetch_row($result);
-    if (isset($row[0]))
-    	return $row[0];
-    else
-    	return '';
+	return is_array($row) ? $row[0] : '';
 }
 
 //----------------------------------------------------------------------------------------------------
@@ -224,8 +221,7 @@ function print_inventory_purchase()
 		}
 		
 		$curr = get_supplier_currency($trans['supplier_id']);
-		$rate = get_exchange_rate_from_home_currency($curr, sql2date($trans['tran_date']));
-		$trans['price'] *= $rate;
+		$trans['price'] *= $trans['ex_rate'];
 		$rep->NewLine();
 		$trans['supp_reference'] = get_supp_inv_reference($trans['supplier_id'], $trans['stock_id'], $trans['tran_date']);
 		$rep->fontSize -= 2;
@@ -267,7 +263,7 @@ function print_inventory_purchase()
 			$rep->NewLine();
 			$rep->NewLine();
 			$total_supp = $total_qty = 0.0;
-			$supplier_name = $trans['supplier_name'];
+			$supplier_name = isset($trans['supplier_name']) ? $trans['supplier_name'] : "";
 		}	
 	}
 	if ($supplier_name != '')

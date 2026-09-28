@@ -431,14 +431,14 @@ function small_qty_cells($label, $name, $init=null, $params=null, $post_label=nu
 
 //-----------------------------------------------------------------------------------
 
-function textarea_cells($label, $name, $value, $cols, $rows, $title = null, $params="")
+function textarea_cells($label, $name, $value, $cols, $rows, $max=255, $title = null, $params="")
 {
-	InputRenderer::get()->textarea_cells($label, $name, $value, $cols, $rows, $title, $params);
+	InputRenderer::get()->textarea_cells($label, $name, $value, $cols, $rows, $max, $title, $params);
 }
 
-function textarea_row($label, $name, $value, $cols, $rows, $title=null, $params="")
+function textarea_row($label, $name, $value, $cols, $rows, $max=255, $title=null, $params="")
 {
-	InputRenderer::get()->textarea_row($label, $name, $value, $cols, $rows, $title, $params);
+	InputRenderer::get()->textarea_row($label, $name, $value, $cols, $rows, $max, $title, $params);
 }
 
 //-----------------------------------------------------------------------------------

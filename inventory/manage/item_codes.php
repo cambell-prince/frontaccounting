@@ -113,11 +113,15 @@ echo "<hr></center>";
 
 set_global_stock_item($_POST['stock_id']);
 
+$units = $dec = '';
 $result = get_item_code_dflts($_POST['stock_id']);
-$dec = $result['decimals'];
-$units = $result['units'];
-$dflt_desc = $result['description'];
-$dflt_cat = $result['category_id'];
+if ($result) {
+	$dec = $result['decimals'];
+	$units = $result['units'];
+	$dflt_desc = $result['description'];
+	$dflt_cat = $result['category_id'];
+}
+
 
 $result = get_all_item_codes($_POST['stock_id']);
 div_start('code_table');
@@ -177,7 +181,7 @@ start_table(TABLESTYLE2);
 
 hidden('code_id', $selected_id);
 
-text_row(_("UPC/EAN code:"), 'item_code', null, 20, 21);
+text_row(_("UPC/EAN code:"), 'item_code', null, 20, 20);
 qty_row(_("Quantity:"), 'quantity', null, '', $units, $dec);
 text_row(_("Description:"), 'description', null, 50, 200);
 stock_categories_list_row(_("Category:"), 'category_id', null);

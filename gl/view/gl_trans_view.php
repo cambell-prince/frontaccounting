@@ -29,14 +29,17 @@ if (!isset($_GET['type_id']) || !isset($_GET['trans_no']))
 
 function display_gl_heading($myrow)
 {
-	global $systypes_array;
-
+	global $systypes_array, $SysPrefs;
+	
+	if (!empty($SysPrefs->prefs['company_logo_on_views']))
+		company_logo_on_view();
+	
 	$trans_name = $systypes_array[$_GET['type_id']];
 	$journal = $_GET['type_id'] == ST_JOURNAL;
 
     start_table(TABLESTYLE, "width='95%'");
     $th = array(_("General Ledger Transaction Details"), _("Reference"),
-    	_("Transaction Date"), _("Journal #"));
+    	_("Transaction Date"), _("GL #"));
 
 	if ($_GET['type_id'] == ST_JOURNAL)
 		array_insert($th, 3, array(_("Document Date"), _("Event Date")));

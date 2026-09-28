@@ -32,6 +32,7 @@ class current_user
 	var $old_db;
 	var $logged;
 	var $ui_mode = 0;
+	var $login_attempt=0;
 	
 	var $prefs;
 	var $cur_con; // current db connection (can be different from $company for superuser)
@@ -134,6 +135,7 @@ class current_user
                 $this->email = @$myrow["email"];
 		    	update_user_visitdate($this->username);
 		    	$this->logged = true;
+		    	$this->login_attempt=0;
 				$this->last_act = time();
 				$this->timeout = session_timeout();
 				flush_dir(user_js_cache()); // refresh cache on login
@@ -158,8 +160,14 @@ class current_user
 			$hash = md5($password);
 
 			update_user_password($user['id'], $user['user_id'], $hash);
+			
+			$sender = get_company_pref('email');
+			if (empty($sender))
+				$header = "";
+			else
+				$header = "From: $sender";
 
-			mail($email, _("New password for")." ".$SysPrefs->app_title, $password);
+			mail($email, _("New password for")." ".$SysPrefs->app_title, $password, $header);
 
 			return true;
 		}
@@ -305,17 +313,16 @@ function number_format2($number, $decimals=0)
 	$tsep = $SysPrefs->thoseps[user_tho_sep()];
 	$dsep = $SysPrefs->decseps[user_dec_sep()];
 
-	if ($number == '')
-		$number = 0;
+	$number = (float)$number;
 	if($decimals==='max')
 		$dec = 15 - floor(log10(abs($number)));
 	else {
 		$delta = ($number < 0 ? -.0000000001 : .0000000001);
-		@$number += $delta;
+		$number += $delta;
 		$dec = $decimals;
 	}
 
-	$num = number_format($number, $dec, $dsep, $tsep);
+	$num = number_format($number, intval($dec), $dsep, $tsep);
 
 	return $decimals==='max' ? rtrim($num, '0') : $num;
 
@@ -353,23 +360,15 @@ function price_decimal_format($number, &$dec)
 	if ($pos !== false)
 	{
 		$len = strlen(substr($str, $pos + 1));
-		if ($len > $dec)
+		if ($len > $dec && $len < ini_get('precision')-3)
 			$dec = $len;
 	}
 	return number_format2($number, $dec);
 }
-// function money_format doesn't exist in OS Win.
-if (!function_exists('money_format'))
-{
-	function money_format($format, $number) 
-	{
-		return price_format($number);
-	} 
-}	
 
 // 2008-06-15. Added extra parameter $stock_id and reference for $dec
 //--------------------------------------------------------------------
-function qty_format($number, $stock_id=null, &$dec) {
+function qty_format($number, $stock_id, &$dec) {
 	$dec = get_qty_dec($stock_id);
     return number_format2($number, $dec);
 }

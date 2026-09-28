@@ -162,7 +162,7 @@ class ControlRenderer
 		echo "</td></tr><tr><td valign=center $params>";
 	}
 
-	function meta_forward($forward_to, $params = "", $timeout=0)
+	function meta_forward($forward_to, $params = "", $timeout=0, $return=false)
 	{
 		global $Ajax;
 		echo "<meta http-equiv='Refresh' content='".$timeout."; url=$forward_to?$params'>\n";
@@ -171,7 +171,7 @@ class ControlRenderer
 		if ($params !='') $params = '?'.$params;
 		
 		$Ajax->redirect($forward_to . $params);
-		exit();
+		if (!$return) exit();
 	}
 
 	// -----------------------------------------------------------------------------------

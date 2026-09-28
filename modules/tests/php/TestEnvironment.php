@@ -2,6 +2,13 @@
 require_once (__DIR__ . '/TestConfig.php');
 
 $path_to_root = SRC_PATH;
+
+// session.inc defines these for the web entry points, and config.php reads them.
+// The tests load the config files directly, without session.inc, so define them
+// here too. Guarded, in case session.inc got there first.
+if (!defined('VARLIB_PATH')) define('VARLIB_PATH', SRC_PATH . '/tmp');
+if (!defined('VARLOG_PATH')) define('VARLOG_PATH', SRC_PATH . '/tmp');
+
 require_once (SRC_PATH . '/config_db.php');
 require_once (SRC_PATH . '/config.php');
 
@@ -23,6 +30,10 @@ class TestUser extends current_user
 class MockRefs
 {
 	function save() {
+	}
+
+	// void_transaction() releases the reference back to the counter.
+	function restore_last($type, $id) {
 	}
 
 }
@@ -63,6 +74,8 @@ class TestEnvironment
 		self::includeFile('includes/types.inc');
 		self::includeFile('includes/db/comments_db.inc');
 		self::includeFile('includes/db/audit_trail_db.inc');
+		// update_bank_transfer() voids via void_transaction() since 2.4.x
+		self::includeFile('admin/db/voiding_db.inc');
 		self::mockRefs();
 	}
 

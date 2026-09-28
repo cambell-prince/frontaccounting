@@ -30,22 +30,23 @@ print_inventory_valuation_report();
 
 function get_domestic_price($myrow, $stock_id)
 {
-	if ($myrow['type'] == ST_SUPPRECEIVE || $myrow['type'] == ST_SUPPCREDIT)
-	{
-		$price = $myrow['price'];
-		if ($myrow['person_id'] > 0)
-		{
-			// Do we have foreign currency?
-			$supp = get_supplier($myrow['person_id']);
-			$currency = $supp['curr_code'];
-			$ex_rate = get_exchange_rate_to_home_currency($currency, sql2date($myrow['tran_date']));
-			$price /= $ex_rate;
-		}	
-	}
-	else
-		$price = $myrow['standard_cost']; // Item Adjustments just have the real cost
-	return $price;
-}	
+    if ($myrow['type'] == ST_SUPPRECEIVE || $myrow['type'] == ST_SUPPCREDIT)
+     {
+        $price = $myrow['price'];
+        if ($myrow['person_id'] > 0)
+        {
+            // Do we have foreign currency?
+            $supp = get_supplier($myrow['person_id']);
+            $currency = $supp['curr_code'];
+            $ex_rate = $myrow['ex_rate'];
+            $price *= $ex_rate;
+        }
+    }
+    else
+        $price = $myrow['standard_cost']; //pick standard_cost for sales deliveries
+
+    return $price;
+}
 
 function getAverageCost($stock_id, $location, $to_date)
 {
@@ -54,7 +55,7 @@ function getAverageCost($stock_id, $location, $to_date)
 
 	$to_date = date2sql($to_date);
 
-  	$sql = "SELECT move.*, IF(ISNULL(supplier.supplier_id), debtor.debtor_no, supplier.supplier_id) person_id
+  	$sql = "SELECT move.*, supplier.supplier_id person_id, IF(ISNULL(grn.rate), credit.rate, grn.rate) ex_rate
   		FROM ".TB_PREF."stock_moves move
 				LEFT JOIN ".TB_PREF."supp_trans credit ON credit.trans_no=move.trans_no AND credit.type=move.type
 				LEFT JOIN ".TB_PREF."grn_batch grn ON grn.id=move.trans_no AND 25=move.type
@@ -62,7 +63,7 @@ function getAverageCost($stock_id, $location, $to_date)
 				LEFT JOIN ".TB_PREF."debtor_trans cust_trans ON cust_trans.trans_no=move.trans_no AND cust_trans.type=move.type
 				LEFT JOIN ".TB_PREF."debtors_master debtor ON cust_trans.debtor_no=debtor.debtor_no
 			WHERE stock_id=".db_escape($stock_id)."
-			AND move.tran_date < '$to_date' AND standard_cost > 0.001 AND qty <> 0 AND move.type <> ".ST_LOCTRANSFER;
+			AND move.tran_date <= '$to_date' AND standard_cost > 0.001 AND qty <> 0 AND move.type <> ".ST_LOCTRANSFER;
 
 	if ($location != 'all')
 		$sql .= " AND move.loc_code = ".db_escape($location);
@@ -90,30 +91,34 @@ function getTransactions($category, $location, $date)
 {
 	$date = date2sql($date);
 
+	$dec = user_qty_dec();
 	$sql = "SELECT item.category_id,
 			category.description AS cat_description,
 			item.stock_id,
 			item.units,
 			item.description, item.inactive,
 			move.loc_code,
+			units.decimals,
 			SUM(move.qty) AS QtyOnHand, 
 			item.material_cost AS UnitCost,
 			SUM(move.qty) * item.material_cost AS ItemTotal 
 			FROM "
 			.TB_PREF."stock_master item,"
 			.TB_PREF."stock_category category,"
-			.TB_PREF."stock_moves move
+			.TB_PREF."stock_moves move,"
+			.TB_PREF."item_units units
 		WHERE item.stock_id=move.stock_id
 		AND item.category_id=category.category_id
 		AND item.mb_flag<>'D' AND mb_flag <> 'F' 
 		AND move.tran_date <= '$date'
+		AND item.units=units.abbr
 		GROUP BY item.category_id,
 			category.description, ";
 		if ($location != 'all')
 			$sql .= "move.loc_code, ";
 		$sql .= "item.stock_id,
 			item.description
-		HAVING SUM(move.qty) != 0";
+		HAVING ROUND(SUM(move.qty), IF(units.decimals <> -1, units.decimals, $dec)) != 0";
 		if ($category != 0)
 			$sql .= " AND item.category_id = ".db_escape($category);
 		if ($location != 'all')

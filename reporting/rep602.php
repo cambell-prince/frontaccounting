@@ -33,7 +33,7 @@ print_bank_transactions_reconcile();
 function get_bank_balance_to($to, $account)
 {
 	$to = date2sql($to);
-	$sql = "SELECT SUM(amount) FROM ".TB_PREF."bank_trans WHERE bank_act='$account'
+	$sql = "SELECT SUM(amount) FROM ".TB_PREF."bank_trans WHERE bank_act=".db_escape($account)."
 	AND trans_date < '$to'";
 	$result = db_query($sql, "The starting balance on hand could not be calculated");
 	$row = db_fetch_row($result);
@@ -48,9 +48,10 @@ function get_bank_transactions($from, $to, $account)
 			FROM "
 				.TB_PREF."bank_trans trans
 				LEFT JOIN ".TB_PREF."comments com ON trans.type = com.type AND trans.trans_no = com.id
-		WHERE trans.bank_act = '$account'
+		WHERE trans.bank_act = ".db_escape($account)."
 		AND trans_date >= '$from'
 		AND trans_date <= '$to'
+		AND trans.amount <> 0
 		ORDER BY trans_date,trans.id";
 
 	return db_query($sql,"The transactions for '$account' could not be retrieved");

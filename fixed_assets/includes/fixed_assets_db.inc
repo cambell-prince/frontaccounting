@@ -32,7 +32,7 @@ function process_fixed_asset_depreciation($stock_id, $gl_rows, $refline, $memo_)
 
   $value_of_change = 0;
   foreach ($gl_rows as $row) {
-    $value_of_change += round($row['value'], 2);
+    $value_of_change += round2($row['value'], user_price_dec());
 
     $cart->add_gl_item($stock_gl_code["adjustment_account"],
         $stock_gl_code["dimension_id"], $stock_gl_code["dimension2_id"], -$row['value'],
@@ -57,8 +57,6 @@ function process_fixed_asset_depreciation($stock_id, $gl_rows, $refline, $memo_)
     WHERE stock_id=".db_escape($stock_id);
   db_query($sql,"The depreciation start date could not be updated");
 
-  $update_no = -1;
-  add_audit_trail(ST_JOURNAL, $update_no, $date_);
   commit_transaction();
 
   return $trans_no;

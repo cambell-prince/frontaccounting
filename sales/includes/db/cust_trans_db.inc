@@ -111,7 +111,7 @@ function write_customer_trans($trans_type, $trans_no, $debtor_no, $BranchNo,
 	}
 	db_query($sql, "The debtor transaction record could not be inserted");
 
-	if ($trans_type != ST_JOURNAL) // skip for journal entries
+	if ($trans_type != ST_JOURNAL && $trans_type != ST_BANKDEPOSIT && $trans_type != ST_BANKPAYMENT) // skip for journal entries
 		add_audit_trail($trans_type, $trans_no, $date_, $new ? '': _("Updated."));
 
 	return $trans_no;
@@ -125,6 +125,7 @@ function get_customer_trans($trans_id, $trans_type, $customer_id=null)
 	$sql = "SELECT trans.*,"
 		."ov_amount+ov_gst+ov_freight+ov_freight_tax+ov_discount AS Total,"
 		."cust.name AS DebtorName, cust.address, "
+		."cust.debtor_ref, "
 		."cust.curr_code, "
 		."cust.tax_id,
 		trans.prep_amount>0 as prepaid,"
@@ -202,15 +203,11 @@ function get_customer_trans($trans_id, $trans_type, $customer_id=null)
 
 	if (db_num_rows($result) == 0) {
 		// can't return nothing
-		if ($SysPrefs->go_debug)
-			display_backtrace();
 		display_db_error("no debtor trans found for given params", $sql, true);
 		exit;
 	}
 	if (db_num_rows($result) > 1) {
 		// can't return multiple
-		if($SysPrefs->go_debug)
-			display_backtrace();
 		display_db_error("duplicate debtor transactions found for given params", $sql, true);
 		exit;
 	}
@@ -243,7 +240,7 @@ function get_customer_trans_order($type, $type_no)
 
 	$row = db_fetch_row($result);
 
-	return $row[0];
+	return is_array($row) ? $row[0] : false;
 }
 
 //----------------------------------------------------------------------------------------
@@ -302,7 +299,7 @@ function post_void_customer_trans($type, $type_no)
 }
 
 //----------------------------------------------------------------------------------------
-function get_sql_for_customer_inquiry($from, $to, $cust_id = ALL_TEXT, $filter = ALL_TEXT)
+function get_sql_for_customer_inquiry($from, $to, $cust_id = ALL_TEXT, $filter = ALL_TEXT, $show_voided = 0, $ref='')
 {
     $date_after = date2sql($from);
     $date_to = date2sql($to);
@@ -347,11 +344,14 @@ function get_sql_for_customer_inquiry($from, $to, $cust_id = ALL_TEXT, $filter =
                         LEFT JOIN ".TB_PREF."users as user ON (audit.user=user.id)
 			LEFT JOIN ".TB_PREF."cust_branch as branch ON trans.branch_code=branch.branch_code,"
 			.TB_PREF."debtors_master as debtor
-		WHERE debtor.debtor_no = trans.debtor_no" // exclude voided transactions and self-balancing (journal) transactions:
-    		." AND ISNULL(v.date_) AND (trans.ov_amount + trans.ov_gst + trans.ov_freight + trans.ov_freight_tax + trans.ov_discount) != 0";
-
+		WHERE debtor.debtor_no = trans.debtor_no"; // exclude voided transactions and self-balancing (journal) transactions:
+    if (!$show_voided) 	
+    	 	$sql .= " AND ISNULL(v.date_) AND (trans.ov_amount + trans.ov_gst + trans.ov_freight + trans.ov_freight_tax + trans.ov_discount) != 0";
+    if ($ref) {
+    	$sql .= " AND trans.reference LIKE ". db_escape("%$ref%");
+    }	 
 	if ($filter == '2')
-		$sql .= " AND ABS(IF(prep_amount, prep_amount, trans.ov_amount + trans.ov_gst + trans.ov_freight + trans.ov_freight_tax + trans.ov_discount)-trans.alloc)>"
+		$sql .= " AND ABS(IF(prep_amount, prep_amount, ABS(trans.ov_amount) + trans.ov_gst + trans.ov_freight + trans.ov_freight_tax + trans.ov_discount)-trans.alloc)>"
 			.FLOAT_COMP_DELTA;
 	else {
 		$sql .= " AND trans.tran_date >= '$date_after'
@@ -384,17 +384,21 @@ function get_sql_for_customer_inquiry($from, $to, $cust_id = ALL_TEXT, $filter =
    		{
 			$sql .= " AND trans.type = ".ST_CUSTDELIVERY." ";
    		}
+   		elseif ($filter == '6')
+   		{
+			$sql .= " AND trans.type = ".ST_JOURNAL." ";
+   		}
 
     	if ($filter == '2')
     	{
     		$today =  date2sql(Today());
     		$sql .= " AND trans.due_date < '$today'
-				AND (trans.ov_amount + trans.ov_gst + trans.ov_freight_tax + 
+				AND (ABS(trans.ov_amount) + trans.ov_gst + trans.ov_freight_tax + 
 				trans.ov_freight + trans.ov_discount - trans.alloc > 0) ";
     	}
    	}
 
-	$sql .= " GROUP BY trans.trans_no, trans.type";
+	$sql .= " GROUP BY trans.trans_no, trans.type, trans.debtor_no";
 
    	return $sql;
 }

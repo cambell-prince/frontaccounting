@@ -111,6 +111,8 @@ function print_sales_quotations()
 			$rep->TextCol(0, 1,	$myrow2['stk_code'], -2);
 			$oldrow = $rep->row;
 			$rep->TextColLines(1, 2, $myrow2['description'], -2);
+			if (!empty($SysPrefs->prefs['long_description_invoice']) && !empty($myrow2['long_description']))
+				$rep->TextColLines(1, 2, $myrow2['long_description'], -2);
 			$newrow = $rep->row;
 			$rep->row = $oldrow;
 			if ($Net != 0.0 || !is_service($myrow2['mb_flag']) || !$SysPrefs->no_zero_lines_amount())
@@ -183,7 +185,7 @@ function print_sales_quotations()
 					if ($first)
 					{
 						$rep->TextCol(3, 6, _("Total Tax Excluded"), -2);
-						$rep->TextCol(6, 7,	number_format2($sign*$tax_item['net_amount'], $dec), -2);
+						$rep->TextCol(6, 7,	number_format2($tax_item['net_amount'], $dec), -2);
 						$rep->NewLine();
 					}
 					$rep->TextCol(3, 6, $tax_type_name, -2);

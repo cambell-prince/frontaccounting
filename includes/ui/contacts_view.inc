@@ -27,14 +27,14 @@ class contacts extends simple_crud {
 
 		parent::__construct($name, $fields);
 		$this->class = $class;
-		$this->subclass = $subclass;
+		$this->sub_class = $subclass;
 		$this->entity = $id;
 	}
 
 	function list_view() {
 		br();
 
-			$contacts = get_crm_persons($this->class, $this->subclass, $this->entity);
+			$contacts = get_crm_persons($this->class, $this->sub_class, $this->entity);
 			start_table(TABLESTYLE, "width='80%'");
 
 			$th = array(_('Assignment'), _("Reference"), _("Full Name"), _("Phone"), _("Sec Phone"), _("Fax"),
@@ -48,7 +48,7 @@ class contacts extends simple_crud {
 			while ($last)
 			{
 					
-				if ($myrow['id'] != $last['id']) {
+				if (@$myrow['id'] != $last['id']) {
 					alt_table_row_color($k);
 					label_cell(implode('<br>',$description));
 					label_cell($last["ref"]);
@@ -91,7 +91,7 @@ class contacts extends simple_crud {
 		text_row(_("Reference:"), 'ref', @$this->data['ref'], 35, 40);
 
 		crm_category_types_list_row(_("Contact active for:"), 'assgn', @$this->data['contacts'],
-			array('subclass' => @$this->subclass,
+			array('subclass' => @$this->sub_class,
 				'class' => @$this->class, 
 				'multi' =>true)
 				);
@@ -134,7 +134,7 @@ class contacts extends simple_crud {
 			set_focus('ref');
 			return false;
 		}
-		if (count(@$_POST['assgn']) == 0) {
+		if (count_array(@$_POST['assgn']) == 0) {
 			display_error(_("You have to select at least one category."));
 			set_focus('assgn');
 			return false;

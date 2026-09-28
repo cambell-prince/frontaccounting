@@ -9,13 +9,14 @@
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
     See the License here <http://www.gnu.org/licenses/gpl-3.0.html>.
 ***********************************************************************/
+require_once($path_to_root. "/admin/db/attachments_db.inc");
+
 function add_journal($type, $trans_no, $amount, $tran_date, $currency, $reference, $source_ref='', $rate=1,
 	 $event_date='', $doc_date='')
 {
 	$sql = "INSERT INTO ".TB_PREF."journal(
-	   `type`,`trans_no`, `amount`, `currency`, `rate`, `reference`, `source_ref`, `tran_date`,
-	   `event_date`, `doc_date`)
-	   VALUES("
+	   `type`,`trans_no`, `amount`, `currency`, `rate`, `reference`, `source_ref`, `tran_date`,`event_date`,`doc_date`)
+	  VALUES("
 	  .db_escape($type).","
 	  .db_escape($trans_no).","
 	  .db_escape($amount).","
@@ -23,9 +24,9 @@ function add_journal($type, $trans_no, $amount, $tran_date, $currency, $referenc
 	  .db_escape($rate).","
 	  .db_escape($reference).","
 	  .db_escape($source_ref).","
-	  ."'".date2sql($tran_date)."',"
-	  ."'".date2sql($event_date)."',"
-	  ."'".date2sql($doc_date)."')";
+	  ."'".date2sql($tran_date)."','"
+	  . ($event_date === '' ? '0000-00-00' : date2sql($event_date))."','"
+	  . ($doc_date === '' ? '0000-00-00' : date2sql($doc_date))."')";
 
 	return db_query($sql, 'cannot add journal entry');
 }
@@ -39,9 +40,9 @@ function update_journal($type, $trans_no, $amount, $tran_date, $currency, $refer
 	  ."`rate`=".db_escape($rate).","
 	  ."`reference`=".db_escape($reference).","
 	  ."`source_ref`=".db_escape($source_ref).","
-	  ."`tran_date`="."'".date2sql($tran_date)."',"
-	  ."`event_date`="."'".date2sql($event_date)."',"
-	  ."`doc_date`="."'".date2sql($doc_date)."')
+	  ."`tran_date`='".date2sql($tran_date)."',"
+	  ."`event_date`='".($event_date === '' ? '0000-00-00' : date2sql($event_date))."',"
+	  ."`doc_date`='".($doc_date === '' ? '0000-00-00' : date2sql($doc_date))."'
 	   WHERE `type`=".db_escape($type)." AND " ."`trans_no`=".db_escape($trans_no);
 
 	return db_query($sql, 'cannot update journal entry');
@@ -49,6 +50,8 @@ function update_journal($type, $trans_no, $amount, $tran_date, $currency, $refer
 
 function delete_journal($type, $trans_no)
 {
+    delete_attachments($type, $trans_no);
+
 	$sql = "DELETE FROM ".TB_PREF."journal 
 	   WHERE `type`=".db_escape($type)." AND " ."`trans_no`=".db_escape($trans_no);
 
@@ -72,12 +75,10 @@ function write_cust_journal($trans_type, $trans_no, $branch_id, $date, $ref, $am
 {
 	// we have to select any branch_id for given AR_act - in fact w
 	$sql = "INSERT INTO ".TB_PREF."debtor_trans (trans_no, type, debtor_no, branch_code, tran_date, reference, ov_amount, rate)
-		SELECT "
-		.db_escape($trans_no).", ".db_escape($trans_type).", debtor_no,"
-		.db_escape($branch_id).",'".date2sql($date)."', ".db_escape($ref).","
-		.db_escape($amount).", ".db_escape($rate)."
-		FROM ".TB_PREF."cust_branch WHERE branch_code=".db_escape($branch_id);
-
+        VALUES (".db_escape($trans_no).", ".db_escape($trans_type).", 
+			(SELECT debtor_no FROM ".TB_PREF."cust_branch WHERE branch_code=".db_escape($branch_id). ") ,"
+			.db_escape($branch_id).",'".date2sql($date)."', ".db_escape($ref).","
+			.db_escape($amount).", ".db_escape($rate).")";
 	return db_query($sql, 'cannot write cust_journal');
 }
 
@@ -106,9 +107,10 @@ function write_journal_entries(&$cart)
 	$memo_ = $cart->memo_;
 	$trans_type = $cart->trans_type;
 	$new = $cart->order_id == 0;
+	$old_no = $cart->order_id;
 
 	begin_transaction();
-
+	hook_db_prewrite($cart, ST_JOURNAL);
 	if (!$new)
 	{
 		$msg = void_transaction($trans_type, $cart->order_id, Today(), _("Document reentered."));
@@ -120,6 +122,19 @@ function write_journal_entries(&$cart)
 	}
 
 	$trans_id = $cart->order_id = get_next_trans_no($trans_type);
+	if ($old_no)
+	{
+		$aid = 0;
+		$aid = has_attachment($trans_type, $old_no);
+		if ($aid != 0)
+		{
+			move_trans_attachments($trans_type, $old_no, $trans_id);
+			//$row = get_attachment($aid);
+			//update_attachment($aid, $row['type_no'], $trans_id, $row['description'],
+			//	$row['filename'], $row['unique_name'], $row['filesize'], $row['filetype']);
+		}
+
+	}	
 	$total = $cart->gl_items_total_debit();
 
 	$cart->write_gl();
@@ -135,7 +150,7 @@ function write_journal_entries(&$cart)
 	}
 
 	add_audit_trail($trans_type, $trans_id, $date_);
-
+	hook_db_postwrite($cart, ST_JOURNAL);
 	commit_transaction();
 
 	return $trans_id;

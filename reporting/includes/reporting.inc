@@ -14,7 +14,7 @@
 // or display_note(print_document_link($order_no, _("Print this order")));
 // You only need full parameter list for invoices/credit notes
 
-function print_document_link($doc_no, $link_text, $link=true, $type_no, 
+function print_document_link($doc_no, $link_text, $link, $type_no, 
 	$icon=false, $class='printlink', $id='', $email=0, $extra=0)
 {
 	global $path_to_root;
@@ -92,8 +92,9 @@ function print_document_link($doc_no, $link_text, $link=true, $type_no,
 				'PARAM_0' => $doc_no, 
 				'PARAM_1' => $doc_no, 
 				'PARAM_2' => '', 
-				'PARAM_3' => '',
-				'PARAM_4' => $def_orientation);
+				'PARAM_3' => $email,
+				'PARAM_4' => '',
+				'PARAM_5' => $def_orientation);
 			break;
 		case ST_SUPPAYMENT :
 			$rep = 210;
@@ -116,6 +117,16 @@ function print_document_link($doc_no, $link_text, $link=true, $type_no,
 				'PARAM_3' => '', 
 				'PARAM_4' => $def_orientation);
 			break;
+		case ST_DIMENSION :
+			$rep = 501;
+			// from, to, email, comments, orientation
+			$ar = array(
+				'PARAM_0' => $doc_no, 
+				'PARAM_1' => $doc_no, 
+				'PARAM_2' => 1, 
+				'PARAM_3' => '', 
+				'PARAM_4' => $def_orientation);
+			break;
 		default:
 			return null;
 	}
@@ -129,16 +140,16 @@ function print_link($link_text, $rep, $pars = array(), $dir = '',
 	$icon=false, $class='printlink', $id='')
 {
 	global $path_to_root, $SysPrefs;
-
 	$url = $dir == '' ?  $path_to_root.'/reporting/prn_redirect.php?' : $dir;
 
 	$id = default_focus($id);
+	$parm = array();
 	foreach($pars as $par => $val) {
-		$pars[$par] = "$par=".urlencode($val);
+		if ($val != "")
+			$parm[] = "$par=".urlencode($val);
 	}
-	$pars[] = 'REP_ID='.urlencode($rep);
-	$url .= implode ('&', $pars);
-
+	$parm[] = 'REP_ID='.urlencode($rep);
+	$url .= implode ('&', $parm);
 	if ($class != '')
 		$class = $SysPrefs->pdf_debug ? '' : " class='$class'";
 	if ($id != '')

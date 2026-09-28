@@ -9,6 +9,7 @@
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
     See the License here <http://www.gnu.org/licenses/gpl-3.0.html>.
 ***********************************************************************/
+require_once($path_to_root. "/admin/db/attachments_db.inc");
 
 function add_customer($CustName, $cust_ref, $address, $tax_id, $curr_code,
 	$dimension_id, $dimension2_id, $credit_status, $payment_terms, $discount, $pymt_discount, 
@@ -55,8 +56,9 @@ function delete_customer($customer_id)
 	begin_transaction();
 	delete_entity_contacts('customer', $customer_id);
 
-	$sql = "DELETE FROM ".TB_PREF."debtors_master WHERE debtor_no=".db_escape($customer_id);;
+	$sql = "DELETE FROM ".TB_PREF."debtors_master WHERE debtor_no=".db_escape($customer_id);
 	db_query($sql,"cannot delete customer");
+	delete_attachments(ST_CUSTOMER, $customer_id);
 	commit_transaction();
 }
 
@@ -72,40 +74,44 @@ function get_customer_details($customer_id, $to=null, $all=true)
 		$todate = date2sql($to);
 	$past1 = get_company_pref('past_due_days');
 	$past2 = 2 * $past1;
-	// removed - debtor_trans.alloc from all summations
-	$sign = "IF(`type` IN(".implode(',',  array(ST_CUSTCREDIT,ST_CUSTPAYMENT,ST_BANKDEPOSIT))."), -1, 1)";
-	if ($all)
-    	$value = "IFNULL($sign*(trans.ov_amount + trans.ov_gst + trans.ov_freight + trans.ov_freight_tax + trans.ov_discount),0)";
-    else		
-    	$value = "IFNULL($sign*(trans.ov_amount + trans.ov_gst + trans.ov_freight + trans.ov_freight_tax + trans.ov_discount - 
-    		trans.alloc),0)";
+
+	$sign = "IF(trans.type IN(".implode(',',  array(ST_CUSTCREDIT,ST_CUSTPAYMENT,ST_BANKDEPOSIT))."), -1, 1)";
+	$value = "$sign*(IF(trans.prep_amount, trans.prep_amount,
+		ABS(trans.ov_amount + trans.ov_gst + trans.ov_freight + trans.ov_freight_tax + trans.ov_discount)) ".($all ? '' : "- trans.alloc").")";
+
 	$due = "IF (trans.type=".ST_SALESINVOICE.", trans.due_date, trans.tran_date)";
-    $sql = "SELECT debtor.name, debtor.curr_code, terms.terms, debtor.credit_limit,
-    			credit_status.dissallow_invoices, credit_status.reason_description,
-				Sum($value) AS Balance,
-				Sum(IF ((TO_DAYS('$todate') - TO_DAYS($due)) > 0,$value,0)) AS Due,
-				Sum(IF ((TO_DAYS('$todate') - TO_DAYS($due)) > $past1,$value,0)) AS Overdue1,
-				Sum(IF ((TO_DAYS('$todate') - TO_DAYS($due)) > $past2,$value,0)) AS Overdue2
-			FROM ".TB_PREF."debtors_master debtor
-				 LEFT JOIN ".TB_PREF."debtor_trans trans ON trans.tran_date <= '$todate' AND debtor.debtor_no = trans.debtor_no AND trans.type <> ".ST_CUSTDELIVERY.","
-				 .TB_PREF."payment_terms terms,"
-				 .TB_PREF."credit_status credit_status
-			WHERE
-					debtor.payment_terms = terms.terms_indicator
-	 			AND debtor.credit_status = credit_status.id";
-	 if ($customer_id)
+	$sql = "SELECT debtor.name, debtor.curr_code, terms.terms,
+		debtor.credit_limit, credit_status.dissallow_invoices, credit_status.reason_description,
+
+		Sum(IFNULL($value,0)) AS Balance,
+		Sum(IF ((TO_DAYS('$todate') - TO_DAYS($due)) >= 0,$value,0)) AS Due,
+		Sum(IF ((TO_DAYS('$todate') - TO_DAYS($due)) >= $past1,$value,0)) AS Overdue1,
+		Sum(IF ((TO_DAYS('$todate') - TO_DAYS($due)) >= $past2,$value,0)) AS Overdue2
+
+		FROM ".TB_PREF."debtors_master debtor
+			LEFT JOIN ".TB_PREF."debtor_trans trans ON trans.tran_date <= '$todate' AND debtor.debtor_no = trans.debtor_no AND trans.type <> ". ST_CUSTDELIVERY.",
+			".TB_PREF."payment_terms terms,
+			".TB_PREF."credit_status credit_status
+
+		WHERE
+			 debtor.payment_terms = terms.terms_indicator
+			 AND debtor.credit_status = credit_status.id";
+
+	if ($customer_id)
 		$sql .= " AND debtor.debtor_no = ".db_escape($customer_id);
 
 	if (!$all)
-		$sql .= " AND ABS(trans.ov_amount + trans.ov_gst + trans.ov_freight + trans.ov_freight_tax + trans.ov_discount - trans.alloc) > ".FLOAT_COMP_DELTA;
+		$sql .= " AND ABS(IF(trans.prep_amount, trans.prep_amount, ABS(trans.ov_amount) + trans.ov_gst + trans.ov_freight + trans.ov_freight_tax + trans.ov_discount) - trans.alloc) > ".FLOAT_COMP_DELTA;
+
 	$sql .= " GROUP BY
-			  	debtor.name,
-			  	terms.terms,
-			  	terms.days_before_due,
-			  	terms.day_in_following_month,
-			  	debtor.credit_limit,
-			  	credit_status.dissallow_invoices,
-			  	credit_status.reason_description";
+				debtor.name,
+				terms.terms,
+				terms.days_before_due,
+				terms.day_in_following_month,
+				debtor.credit_limit,
+				credit_status.dissallow_invoices,
+				credit_status.reason_description";
+
     $result = db_query($sql,"The customer details could not be retrieved");
 
     $customer_record = db_fetch($result);
@@ -132,7 +138,7 @@ function get_customer_name($customer_id)
 
 	$row = db_fetch_row($result);
 
-	return $row[0];
+	return is_array($row) ? $row[0] : false;
 }
 
 function get_customer_habit($customer_id)
@@ -165,6 +171,8 @@ function get_current_cust_credit($customer_id)
 {
 	$custdet = get_customer_details($customer_id);
 
+	if (!is_array($custdet))
+		return 0;
 	return $custdet['credit_limit']-$custdet['Balance'];
 
 }
@@ -197,7 +205,7 @@ function get_customer_currency($customer_id=null, $branch_id=null)
 	$result = db_query($sql, "Retreive currency of customer $customer_id");
 
 	$myrow=db_fetch_row($result);
-	return $myrow[0];
+	return $myrow ? $myrow[0] : get_company_currency();
 }
 
 function get_customers_search($customer)

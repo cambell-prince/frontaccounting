@@ -205,6 +205,7 @@ class InputRenderer
 						break;
 
 					case 'nonajax':
+					case 'download':
 						$atype = false;
 				}
 			}
@@ -351,7 +352,7 @@ class InputRenderer
 			}
 			else
 				return "<input type='submit' class='editbutton' name='"
-					.htmlentities(strtr($name, array('.'=>'=2E', '='=>'=3D',// ' '=>'=20','['=>'=5B'
+					.html_specials_encode(strtr($name, array('.'=>'=2E', '='=>'=3D',// ' '=>'=20','['=>'=5B'
 					)))
 					."' value='$value'"
 					.($title ? " title='$title'":'')
@@ -384,6 +385,12 @@ class InputRenderer
 	// -----------------------------------------------------------------------------------
 	function check_value($name)
 	{
+		if (is_array($name)) {
+			$ret = array();
+			foreach($name as $key)
+				$ret[$key] = check_value($key);
+			return $ret;
+		}
 		if (isset($_POST[$name]) && $_POST[$name])
 			return 1;
 		return 0;
@@ -698,7 +705,7 @@ class InputRenderer
 	function password_row($label, $name, $value)
 	{
 		echo "<tr><td class='label'>$label</td>";
-		label_cell("<input type='password' name='$name' size=20 maxlength=20 value='$value' />");
+		label_cell("<input type='password' name='$name' size=32 maxlength=32 value='$value' />");
 		echo "</tr>\n";
 	}
 
@@ -767,7 +774,7 @@ class InputRenderer
 	
 			label_cell($list."<input name='".$name."' "
 				.(check_edit_access($name) ? '' : 'disabled ')
-				."value='".@$_POST[$name]."' size=10 maxlength=35>");
+				."value='".@$_POST[$name]."' size=16 maxlength=35>");
 		}
 		else // just wildcard ref field (e.g. for global inquires)
 		{
@@ -902,7 +909,7 @@ class InputRenderer
 	}
 
 	// -----------------------------------------------------------------------------------
-	function textarea_cells($label, $name, $value, $cols, $rows, $title = null, $params = "")
+	function textarea_cells($label, $name, $value, $cols, $rows, $max = 255, $title = null, $params = "")
 	{
 		global $Ajax;
 
@@ -911,14 +918,14 @@ class InputRenderer
 			echo "<td $params>$label</td>\n";
 		if ($value == null)
 			$value = (! isset($_POST[$name]) ? "" : $_POST[$name]);
-		echo "<td><textarea name='$name' cols='$cols' rows='$rows'" . ($title ? " title='$title'" : '') . ">$value</textarea></td>\n";
+		echo "<td><textarea name='$name' cols='$cols' rows='$rows'" . ($title ? " title='$title'" : '') . ($max ? " maxlength=$max" : '') . ">$value</textarea></td>\n";
 		$Ajax->addUpdate($name, $name, $value);
 	}
 
-	function textarea_row($label, $name, $value, $cols, $rows, $title = null, $params = "")
+	function textarea_row($label, $name, $value, $cols, $rows, $max = 255, $title = null, $params = "")
 	{
 		echo "<tr><td class='label'>$label</td>";
-		textarea_cells(null, $name, $value, $cols, $rows, $title, $params);
+		textarea_cells(null, $name, $value, $cols, $rows, $max, $title, $params);
 		echo "</tr>\n";
 	}
 

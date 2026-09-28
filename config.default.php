@@ -29,7 +29,7 @@ if (!isset($path_to_root) || isset($_GET['path_to_root']) || isset($_POST['path_
 	// writable by www server. When set to empty string logging is switched off. 
 	// Special value 'syslog' can be used for system logger usage (see php manual).
 	//$error_logfile = '';
-	$error_logfile = $path_to_root.'/tmp/errors.log';
+	$error_logfile = VARLOG_PATH.'/errors.log';
 	$debug 			= 1;	// show sql on database errors
 
 	$show_sql 		= 0;	// show all sql queries in page footer for debugging purposes
@@ -150,8 +150,7 @@ if (!isset($path_to_root) || isset($_GET['path_to_root']) || isset($_POST['path_
 	$graph_skin 	= 1;
 
 	/* UTF-8 font for Business Graphics. Copy it to /reporting/fonts/ folder. */
-	$UTF8_fontfile	= "FreeSans.ttf";
-	//$UTF8_fontfile	= "zarnormal.ttf"; // for Arabic Dashboard
+	$UTF8_fontfile	= isset($_SESSION['language']) && $_SESSION['language']->dir == 'rtl' ? "zarnormal.ttf" : "FreeSans.ttf"; // for  Dashboard
 
 /* 
 	Display a dropdown select box for choosing Company to login if false.
@@ -178,7 +177,7 @@ if (!isset($path_to_root) || isset($_GET['path_to_root']) || isset($_POST['path_
 	Choose Exchange Rate Provider
 	Default is ECB for backwards compatibility
 */
-	$xr_providers = array("ECB", "YAHOO", "GOOGLE", "BLOOMBERG");
+	$xr_providers = array("ECB", "EXCHANGE-RATES.ORG", "GOOGLE", "YAHOO", "BLOOMBERG");
 	$dflt_xr_provider = 0;
 
 /*

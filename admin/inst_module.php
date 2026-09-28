@@ -42,8 +42,18 @@ function local_extension($id)
 			'active' => false
 	);
 
-	if (file_exists($path_to_root.'/modules/'.clean_file_name($id).'/hooks.php')) {
-		include_once($path_to_root.'/modules/'.clean_file_name($id).'/hooks.php');
+	$local_module_path = $path_to_root.'/modules/'.clean_file_name($id);
+	$local_config_file = $local_module_path.'/_init/config';
+	$local_hook_file = $local_module_path.'/hooks.php';
+
+	if (file_exists($local_config_file)) {
+		$ctrl = get_control_file($local_config_file);
+		if (key_exists('Name', $ctrl)) $exts[$next_extension_id-1]['name'] = $ctrl['Name'];
+		if (key_exists('Version', $ctrl)) $exts[$next_extension_id-1]['version'] = $ctrl['Version'];
+	}
+	if (file_exists($local_hook_file)) {
+		include_once($local_hook_file);
+
 	}
 	$hooks_class = 'hooks_'.$id;
 	if (class_exists($hooks_class, false)) {
@@ -79,17 +89,6 @@ function handle_delete($id)
 	}
 	return true;
 }
-//
-// Helper for formating menu tabs/entries to be displayed in extension table
-//
-function fmt_titles($defs)
-{
-		if (!$defs) return '';
-		foreach($defs as $def) {
-			$str[] = access_string($def['title'], true);
-		}
-		return implode('<br>', array_values($str));
-}
 //---------------------------------------------------------------------------------------------
 //
 // Display list of all extensions - installed and available from repository
@@ -101,8 +100,7 @@ function display_extensions($mods)
 	div_start('ext_tbl');
 	start_table(TABLESTYLE);
 
-	$th = array(_("Extension"),_("Modules provided"), _("Options provided"),
-		 _("Installed"), _("Available"),  "", "");
+	$th = array(_("Extension"), _("Installed"), _("Available"),  "", "");
 	table_header($th);
 
 	$k = 0;
@@ -113,17 +111,12 @@ function display_extensions($mods)
 		$installed = @$ext['version'];
 		$id = @$ext['local_id'];
 
-		$entries = fmt_titles(@$ext['entries']);
-		$tabs = fmt_titles(@$ext['tabs']);
-
 		alt_table_row_color($k);
 
 		label_cell($available ? get_package_view_str($pkg_name, $ext['name']) : $ext['name']);
-		label_cell($tabs);
-		label_cell($entries);
 
 		label_cell($id === null ? _("None") :
-			($available && $installed ? $installed : _("Unknown")));
+			(($installed && ($installed != '-' || $installed != '')) ? $installed : _("Unknown")));
 		label_cell($available ? $available : _("Unknown"));
 
 		if (!$available && $ext['type'] == 'extension')	{// third-party plugin
@@ -164,7 +157,7 @@ function company_extensions($id)
 {
 	start_table(TABLESTYLE);
 	
-	$th = array(_("Extension"),_("Modules provided"), _("Options provided"), _("Active"));
+	$th = array(_("Extension"), _("Version"), _("Path"), _("Active"));
 	
 	$mods = get_company_extensions();
 	$exts = get_company_extensions($id);
@@ -181,15 +174,14 @@ function company_extensions($id)
 	foreach($mods as $i => $mod)
 	{
 		if ($mod['type'] != 'extension') continue;
-   		alt_table_row_color($k);
+		alt_table_row_color($k);
 		label_cell($mod['name']);
-		$entries = fmt_titles(@$mod['entries']);
-		$tabs = fmt_titles(@$mod['tabs']);
-		label_cell($tabs);
-		label_cell($entries);
+		label_cell($mod['version']);
+		label_cell($mod['path']);
 
 		check_cells(null, 'Active'.$i, @$mod['active'] ? 1:0, 
 			false, false, "align='center'");
+
 		end_row();
 	}
 

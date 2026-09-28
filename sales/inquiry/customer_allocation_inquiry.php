@@ -114,9 +114,10 @@ function alloc_link($row)
 	{
 		/*its a negative receipt */
 		return '';
-	} elseif (($row["type"] == ST_SALESINVOICE && ($row['TotalAmount'] - $row['Allocated']) > 0) || $row["type"] == ST_BANKPAYMENT)
+	} elseif (($row["type"] == ST_SALESINVOICE && ($row['TotalAmount'] - $row['Allocated']) > 0) || 
+		($row["type"] == ST_JOURNAL && (ABS($row['TotalAmount']) - $row['Allocated']) > 0) || $row["type"] == ST_BANKPAYMENT)
 		return pager_link(_("Payment"),
-			"/sales/customer_payments.php?customer_id=".$row["debtor_no"]."&SInvoice=" . $row["trans_no"], ICON_MONEY);
+			"/sales/customer_payments.php?customer_id=".$row["debtor_no"]."&SInvoice=" . $row["trans_no"]."&Type=".$row["type"], ICON_MONEY);
 
 }
 
@@ -147,8 +148,8 @@ $cols = array(
 	_("#") => array('fun'=>'view_link', 'align'=>'right'),
 	_("Reference"), 
 	_("Order") => array('fun'=>'order_link', 'ord'=>'', 'align'=>'right'), 
-	_("Date") => array('name'=>'tran_date', 'type'=>'date', 'ord'=>'asc'),
-	_("Due Date") => array('type'=>'date', 'fun'=>'due_date'),
+	_("Date") => array('name'=>'tran_date', 'type'=>'date', 'ord'=>''),
+	_("Due Date") => array('name'=>'due_date', 'type'=>'date', 'fun'=>'due_date', 'ord'=>'asc'),
 	_("Customer") => array('name' =>'name',  'ord'=>'asc'), 
 	_("Currency") => array('align'=>'center'),
 	_("Debit") => array('align'=>'right','fun'=>'fmt_debit'), 

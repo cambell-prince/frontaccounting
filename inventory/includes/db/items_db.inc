@@ -9,8 +9,10 @@
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
     See the License here <http://www.gnu.org/licenses/gpl-3.0.html>.
 ***********************************************************************/
+require_once($path_to_root. "/admin/db/attachments_db.inc");
+
 function update_item($stock_id, $description, $long_description, $category_id, 
-	$tax_type_id, $units='', $mb_flag='', $sales_account, $inventory_account, 
+	$tax_type_id, $units, $mb_flag, $sales_account, $inventory_account, 
 	$cogs_account, 	$adjustment_account, $wip_account, $dimension_id, 
 	$dimension2_id, $no_sale, $editable, $no_purchase,
 	$depreciation_method = 'D', $depreciation_rate=100, $depreciation_factor=1,
@@ -41,7 +43,7 @@ function update_item($stock_id, $description, $long_description, $category_id,
 	if ($mb_flag != '')
 		$sql .= ", mb_flag=".db_escape($mb_flag);
 
-	if ($depreciation_start != '') {
+	if (isset($depreciation_start)) {
 		$sql .= ", depreciation_start='".date2sql($depreciation_start)."'"
 			.", depreciation_date='".date2sql($depreciation_start)."'";
 	}
@@ -63,8 +65,9 @@ function add_item($stock_id, $description, $long_description, $category_id,
 	$sql = "INSERT INTO ".TB_PREF."stock_master (stock_id, description, long_description, category_id,
 		tax_type_id, units, mb_flag, sales_account, inventory_account, cogs_account,
 		adjustment_account, wip_account, dimension_id, dimension2_id, no_sale, no_purchase, editable,
-		depreciation_method, depreciation_rate, depreciation_factor, depreciation_start, depreciation_date, fa_class_id)
-		VALUES (".db_escape($stock_id).", ".db_escape($description).", ".db_escape($long_description).",
+		depreciation_method, depreciation_rate, depreciation_factor"
+		.(isset($depreciation_start) ? ", depreciation_start, depreciation_date, fa_class_id" : "")
+		.") VALUES (".db_escape($stock_id).", ".db_escape($description).", ".db_escape($long_description).",
 		".db_escape($category_id).", ".db_escape($tax_type_id).", "
 		.db_escape($units).", ".db_escape($mb_flag).",
 		".db_escape($sales_account).", ".db_escape($inventory_account)
@@ -74,9 +77,9 @@ function add_item($stock_id, $description, $long_description, $category_id,
 		.db_escape($no_sale).","
 		.db_escape($no_purchase).","
 		.db_escape($editable).","
-		.db_escape($depreciation_method).",".db_escape($depreciation_rate).",".db_escape($depreciation_factor).",'"
-		.date2sql($depreciation_start)."','".date2sql($depreciation_start)."',"
-		.db_escape($fa_class_id).")";
+		.db_escape($depreciation_method).",".db_escape($depreciation_rate).",".db_escape($depreciation_factor)
+		.(isset($depreciation_start) ? ",'".date2sql($depreciation_start)."','".date2sql($depreciation_start)."',".db_escape($fa_class_id) : "")
+		.")";
 
 	db_query($sql, "The item could not be added");
 
@@ -91,10 +94,8 @@ function add_item($stock_id, $description, $long_description, $category_id,
 
 function delete_item($stock_id)
 {
-	$sql="DELETE FROM ".TB_PREF."stock_master WHERE stock_id=".db_escape($stock_id);
-	db_query($sql, "could not delete stock item");
 
-	/*and cascade deletes in loc_stock */
+	/*cascade deletes in loc_stock */
 	$sql ="DELETE FROM ".TB_PREF."loc_stock WHERE stock_id=".db_escape($stock_id);
 	db_query($sql, "could not delete stock item loc stock");
 
@@ -110,6 +111,12 @@ function delete_item($stock_id)
 	$sql = "DELETE FROM ".TB_PREF."bom WHERE parent=".db_escape($stock_id);
 	db_query($sql, "could not delete stock item bom");
 
+	delete_attachments(ST_ITEM, get_item_code_id($stock_id));
+
+	/* this can be deleted after attachments are done */
+	$sql="DELETE FROM ".TB_PREF."stock_master WHERE stock_id=".db_escape($stock_id);
+	db_query($sql, "could not delete stock item");
+
 	delete_item_kit($stock_id);
 }
 
@@ -122,7 +129,7 @@ function get_item($stock_id)
 		AND stock_id=".db_escape($stock_id);
 	$result = db_query($sql,"an item could not be retreived");
 
-	return db_fetch($result);
+	return db_fetch_assoc($result);
 }
 
 function get_items($fixed_asset = 0)
@@ -142,7 +149,7 @@ function item_in_foreign_codes($stock_id)
 	 _('Cannot delete this item record because there are bills of material that require this part as a component.'),
 	"SELECT COUNT(*) FROM "
 		.TB_PREF."sales_order_details WHERE stk_code=".db_escape($stock_id) =>
-	 _('Cannot delete this item because there are existing purchase order items for it.'),
+	 _('Cannot delete this item because there are existing sales order items for it.'),
 	"SELECT COUNT(*) FROM "
 		.TB_PREF."purch_order_details WHERE item_code=".db_escape($stock_id)=>
 	 _('Cannot delete this item because there are existing purchase order items for it.')
@@ -227,3 +234,15 @@ function get_items_search($description, $type)
 	return db_query($sql, "Failed in retreiving item list.");
 }
 
+function get_item_code_id($stock_id)
+{
+	$sql = "SELECT ic.id
+		FROM ".TB_PREF."item_codes ic, ".TB_PREF."stock_master sm
+		WHERE ic.item_code = ".db_escape($stock_id)." AND ic.item_code = ic.stock_id AND
+    	ic.stock_id = sm.stock_id";
+
+	$result = db_query($sql, "could not get item id");
+	$row = db_fetch_row($result);
+
+	return is_array($row) ? $row[0] : false;
+}
