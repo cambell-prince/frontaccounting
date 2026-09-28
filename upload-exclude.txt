@@ -1,25 +1,73 @@
+# rsync exclude rules for `make.phar deploy` (deploy/upload.sh) and `package`.
+# What matches is neither sent to the server nor deleted from it by --delete.
+# A pattern starting with / is relative to the top of the release; one without
+# matches at any depth.
+
+# Version control, editors and tooling, anywhere
 .git
 .gitignore
+.gitattributes
 .hg
 .hgtags
 .hgignore
+.github
+.travis.yml
+.project
+.buildpath
+.settings
+.vscode
+.idea
+.devcontainer
+.serena
+.claude
+.superpowers
+.phpunit.result.cache
 node_modules
-gulpfile.js
 docker
 composer.*
 package.json
+package-lock.json
 bower.json
-upload-exclude.txt
-sql/
-config_db.php
-config.php
-modules/api
-modules/tests
-modules/import_paypal
-modules/import_transactions
-modules/sgw_gentry
-themes/bootstrap/less
-themes/bootstrap/vendor/twbs
-themes/bootstrap/vendor/fortawesome/font-awesome/src
-themes/bootstrap/vendor/fortawesome/font-awesome/scss
-themes/bootstrap/vendor/fortawesome/font-awesome/less
+phpunit*.xml
+phpcs.xml
+phpstan.neon
+makefile.json
+upload-exclude*.txt
+
+# Build tooling and output
+/deploy/
+/build/
+/backup/
+/log/
+/sql/
+/install/
+
+# Settings and data that belong to the server
+/config.php
+/config_db.php
+/installed_extensions.php
+/company/
+/tmp/
+/lang/installed_languages.inc
+
+# Extensions: their tests, docs and local data are not deployed, and their
+# own settings and uploads on the server are left alone
+/modules/tests/
+/modules/*/tests/
+/modules/*/docs/
+/modules/*/backup/
+/modules/*/log/
+/modules/*/tmp/
+/modules/graphql/config_graphql.php
+/modules/sgw_import/uploads/
+/modules/api
+/modules/import_paypal
+/modules/import_transactions
+/modules/sgw_gentry
+
+# Theme sources
+/themes/bootstrap/less
+/themes/bootstrap/vendor/twbs
+/themes/bootstrap/vendor/fortawesome/font-awesome/src
+/themes/bootstrap/vendor/fortawesome/font-awesome/scss
+/themes/bootstrap/vendor/fortawesome/font-awesome/less
