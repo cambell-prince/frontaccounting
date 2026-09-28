@@ -36,3 +36,5 @@ vendor_bower/
 /docker/.env
 /build/
 /log/
+/docker/ci/dev/*.env
+!/docker/ci/dev/example.env
