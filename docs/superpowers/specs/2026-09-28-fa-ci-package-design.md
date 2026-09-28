@@ -215,3 +215,93 @@ three have in common. They go in the package, not in each plugin's scripts.
 
   The extra upstream skip in graphql is `CompatDriftTest`, which needs a fork
   file. api was only proven on upstream before; `cp` is added.
+
+## §6 Development environments (plan 3A, 2026-09-29)
+
+graphql kept its own stack only because it was a persistent development
+environment: a database that outlives a session, fixed ports a client app
+points at, dev fixtures, the mail listing. None of that is graphql-specific,
+so the package provides it and graphql's `docker/` goes
+(`docs/superpowers/plans/2026-09-29-fa-ci-package-plan-3a.md`).
+
+- **`docker/ci/plugin-dev.sh`** runs named, persistent environments from the
+  same image as `plugin-test.sh`.
+  - Container `fa-dev-<env>`. Its MariaDB datadir lives on the volume
+    `fa-dev-<env>-db`. Apache is on `127.0.0.1:<port>` (default 8100).
+  - `<env>` defaults to the module name of the plugin checkout (or of the
+    current directory), else `fa`.
+- **`up [<plugin-checkout>]`** creates the environment, or starts it again if
+  it exists (options then only apply at creation). The plugin checkout is
+  optional: an environment can be only `--with` modules.
+  - The options are those of `plugin-test.sh`: `--image`, `--fa`, `--php`,
+    `--with`, `--setup`, `--mount`, `--name`. Also:
+    - `--theme NAME=PATH`, mounted at `themes/NAME`;
+    - `--init CMD`, run in the plugin directory after activation (and again
+      after `db load`);
+    - `--port N`;
+    - `--env NAME`;
+    - `--dataset test|demo|<path to .sql/.sql.gz on the host>`;
+    - `--extensions <installed_extensions.php>`.
+  - Cloned `--with` modules persist under
+    `${XDG_CACHE_HOME:-~/.cache}/fa-ci/dev/<env>/`. `PATH` modules are
+    mounted live, so edits show on the next request.
+  - A dataset loads only when the database volume is new.
+  - If creation fails after the container exists, the environment is kept
+    for inspection. It is not removed.
+- **A dataset file** (a backup) replaces the database as it is. Only the
+  package's `test`/`test` login is added (role 2); fiscal years are not
+  changed.
+- **`--extensions <file>`** gives the modules the extension ids that file lists
+  for them. Activation still follows the `--with` order, because modules
+  depend on each other, and modules the file doesn't list get ids after every
+  id it has used.
+  The file is typically a live site's `installed_extensions.php`. Security
+  codes in a copied database are built from those ids, so live users keep
+  their access.
+- **Other commands:**
+  - `down`
+  - `destroy --yes` (removes the container, the volume and the clones)
+  - `status`, `url`
+  - `shell`, `exec <cmd>` (as the caller's uid with group www-data, in the
+    plugin directory)
+  - `logs [app|errors]`
+  - `mail [list|show <file>|clear]`
+  - `db dump [file]`, `db load <file>` (then re-activates and re-runs
+    `--init`), `db shell`
+  - `activate` (registers and activates the environment's modules again)
+- **Package helpers** for it:
+  - `fa-ci-register --id N`, which fails if the id belongs to another module;
+  - `fa-ci-dataset <path in the container>`;
+  - `fa-ci-ext-list <installed_extensions.php>`, which prints `id package`
+    for each extension.
+- **Out of scope:** xdebug and phpMyAdmin. `db shell` covers the database.
+- **graphql:**
+  - The config-and-seed steps move to `tools/init.sh`, shared by `tools/ci.sh`
+    and `--init`.
+  - The dev fixtures move to `tools/dev-fixtures.sh` and `tools/fixtures.php`.
+  - `docker/` is deleted.
+  - Its dev environment keeps port 8100, which the saygoweb.com-my client's
+    `FA_ENDPOINT` already points at.
+
+## §7 Rehearsing a live upgrade on a dev environment (plan 3B)
+
+After plan 3A, master-ark takes master-cp (so it has the package), and
+`docker/upgrade/rehearse` drives a dev environment instead of the old
+`docker/fa` stack (`docs/superpowers/plans/2026-09-29-fa-ci-package-plan-3b.md`).
+It is executed after plan 3A is merged.
+
+- **Image:** `build-image.sh cp 7.4 fa-ci:ark-7.4`, run in the master-ark
+  checkout, which yields master-ark's 2.4.20 code.
+- **Environment:** `bms-rehearsal`, created with:
+  - the live backup as `--dataset`;
+  - live's `installed_extensions.php` as `--extensions`;
+  - graphql, sgw_sales and sgw_import from the local checkouts under
+    `modules/`, and the bootstrap theme from `themes/bootstrap`.
+- **What activation does:** it applies each module's upgrade SQL through FA,
+  as the real upgrade will. `rehearse migrate` then adds the core
+  preferences, and `rehearse check` reports before and after.
+- **Failures:** a failed activation (e.g. sgw_sales 1.4 on duplicate
+  schedules) leaves the environment up. `check` reports the cause, and
+  `plugin-dev.sh activate` retries once it is fixed.
+- Only the `0_` table prefix is supported. `check` reports what the backup
+  uses.
