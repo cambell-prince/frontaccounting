@@ -45,4 +45,9 @@ expect_status 0 "errors are logged, not displayed, and notices are off" docker e
     'exit((ini_get("display_errors") == "" || ini_get("display_errors") == "0") && !(error_reporting() & E_NOTICE) && ini_get("memory_limit") === "512M" ? 0 : 1);'
 expect_status 0 "databases default to utf8mb4_general_ci, as the plugins' old stacks did" docker exec "$c" mariadb -N -e "SELECT DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'fa_test'"
 expect_contains "fa_test's collation" "utf8mb4_general_ci" "$OUT"
+# shellcheck disable=SC2016 # expands in the container
+expect_status 0 "tmp/errors.log is writable by group www-data from the start" docker exec "$c" sh -c \
+    'test -f /var/www/html/tmp/errors.log && test "$(stat -c %G /var/www/html/tmp/errors.log)" = www-data && test -n "$(find /var/www/html/tmp/errors.log -perm -g+w)"'
+expect_status 0 "the test uid can append to tmp/errors.log" docker exec "$c" \
+    setpriv --reuid=4242 --regid=4242 --groups=33 sh -c 'echo ci-append >> /var/www/html/tmp/errors.log'
 finish
