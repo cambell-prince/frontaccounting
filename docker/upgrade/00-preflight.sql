@@ -23,3 +23,9 @@ SELECT 'Extension tables present' AS `check`,
 SELECT 'sgw_sales 1.4 applied (dt_next nullable)' AS `check`, IFNULL(MAX(is_nullable), '(no table)') AS result
   FROM information_schema.columns
  WHERE table_schema = DATABASE() AND table_name = '0_sales_recurring' AND column_name = 'dt_next';
+
+-- The bootstrap theme's renderers predate 2.4.20's ListRenderer/InputRenderer
+-- signatures (PHP warnings on 7.4, a fatal error on 8.x, and 2.4.20's new list
+-- options ignored on its pages). Who would be affected:
+SELECT CONCAT('Users on theme ', theme) AS `check`, COUNT(*) AS result
+  FROM `0_users` WHERE inactive = 0 GROUP BY theme;
