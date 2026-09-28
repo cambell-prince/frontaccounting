@@ -1,19 +1,29 @@
 #!/usr/bin/env php
 <?php
 /*
-	fa-ci-register <name> <path>
+	fa-ci-register [--id N] <name> <path>
 
 	Add a module to FrontAccounting's extension lists, inactive, as Setup ->
 	Install/Activate Extensions does (write_extensions() in
 	admin/db/maintenance_db.inc): the global installed_extensions.php, with
 	$next_extension_id moved on, and company 0's copy. <path> is relative to the
 	FA root, e.g. modules/graphql. Run it as www-data, which owns those files.
+
+	--id N registers the module under that extension id (a live site's, e.g.
+	from fa-ci-ext-list), rather than the next free one. It refuses an id
+	another module already holds, and moves $next_extension_id past it.
 */
-if ($argc !== 3) {
-	fwrite(STDERR, "usage: fa-ci-register <name> <path relative to the FA root>\n");
+$args = array_slice($argv, 1);
+$want = null;
+if (count($args) === 4 && $args[0] === '--id' && ctype_digit($args[1])) {
+	$want = (int) $args[1];
+	$args = array_slice($args, 2);
+}
+if (count($args) !== 2) {
+	fwrite(STDERR, "usage: fa-ci-register [--id N] <name> <path relative to the FA root>\n");
 	exit(2);
 }
-list(, $name, $path) = $argv;
+list($name, $path) = $args;
 $root = getenv('FA_ROOT') ?: '/var/www/html';
 
 function load_extensions($file)
@@ -40,12 +50,23 @@ function save_extensions($file, $extensions, $next = null)
 list($global, $next) = load_extensions("$root/installed_extensions.php");
 foreach ($global as $id => $ext) {
 	if ($ext['package'] === $name) {
+		if ($want !== null && $want !== $id) {
+			fwrite(STDERR, "fa-ci-register: $name is extension $id, not $want\n");
+			exit(1);
+		}
 		echo "$name is already registered as extension $id\n";
 		exit(0);
 	}
 }
-
-$id = $next ?: (count($global) ? max(array_keys($global)) + 1 : 1);
+if ($want !== null) {
+	if (isset($global[$want])) {
+		fwrite(STDERR, "fa-ci-register: extension $want is {$global[$want]['package']}\n");
+		exit(1);
+	}
+	$id = $want;
+} else {
+	$id = $next ?: (count($global) ? max(array_keys($global)) + 1 : 1);
+}
 $entry = array(
 	'package' => $name,
 	'name' => $name,
@@ -56,7 +77,7 @@ $entry = array(
 	'active' => false,
 );
 $global[$id] = $entry;
-save_extensions("$root/installed_extensions.php", $global, $id + 1);
+save_extensions("$root/installed_extensions.php", $global, max((int) $next, $id + 1));
 
 list($company) = load_extensions("$root/company/0/installed_extensions.php");
 $company[$id] = $entry;

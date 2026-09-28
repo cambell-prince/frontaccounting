@@ -117,11 +117,10 @@ for spec in "${WITH[@]+"${WITH[@]}"}"; do
 done
 for m in "${MOUNTS[@]+"${MOUNTS[@]}"}"; do run_args+=(-v "$m"); done
 
-exec_env=(-e HOME=/tmp)
 if [ -n "${COMPOSER_CACHE_DIR:-}" ]; then
     mkdir -p "$COMPOSER_CACHE_DIR"
     run_args+=(-v "$COMPOSER_CACHE_DIR:/tmp/composer-cache")
-    exec_env+=(-e COMPOSER_CACHE_DIR=/tmp/composer-cache)
+    CI_COMPOSER_CACHE=yes
 fi
 [ "$KEEP" = no ] || run_args+=(-p 127.0.0.1::80)
 
@@ -145,31 +144,19 @@ if [ "$DATASET" != test ]; then
     docker exec "$CONTAINER" fa-ci-dataset "$DATASET"
 fi
 
-# as_user <dir> <command>: sh -c <command> in <dir> as the caller, group www-data added.
-as_user() {
-    docker exec -w "$1" "${exec_env[@]}" "$CONTAINER" \
-        setpriv --reuid="$(id -u)" --regid="$(id -g)" --groups=33 \
-        sh -c "umask 002; $2"
-}
-
 for dep in "${cloned[@]+"${cloned[@]}"}"; do
     log "composer install --no-dev: $dep"
-    as_user "$FA/modules/$dep" '[ ! -f composer.json ] || composer install --no-dev --no-interaction --no-progress'
+    ci_as_user "$CONTAINER" "$FA/modules/$dep" '[ ! -f composer.json ] || composer install --no-dev --no-interaction --no-progress'
 done
 
 if [ -n "$SETUP" ]; then
     log "setup: $SETUP"
-    as_user "$FA/modules/$NAME" "$SETUP"
+    ci_as_user "$CONTAINER" "$FA/modules/$NAME" "$SETUP"
 fi
 
 if [ "$ACTIVATE" = yes ]; then
-    for module in "${deps[@]+"${deps[@]}"}" "$NAME"; do
-        log "activating $module"
-        docker exec -u www-data "$CONTAINER" fa-ci-register "$module" "modules/$module"
-        docker exec "$CONTAINER" fa-ci-activate "$module"
-    done
-    docker exec "$CONTAINER" fa-ci-grant
+    ci_activate "$CONTAINER" "${deps[@]+"${deps[@]}"}" "$NAME"
 fi
 
 log "test: $TEST"
-as_user "$FA/modules/$NAME" "$TEST"
+ci_as_user "$CONTAINER" "$FA/modules/$NAME" "$TEST"

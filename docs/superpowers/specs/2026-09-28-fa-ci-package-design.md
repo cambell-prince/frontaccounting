@@ -215,3 +215,117 @@ three have in common. They go in the package, not in each plugin's scripts.
 
   The extra upstream skip in graphql is `CompatDriftTest`, which needs a fork
   file. api was only proven on upstream before; `cp` is added.
+
+## §6 Development environments (plan 3A, 2026-09-29, revised)
+
+graphql kept its own stack only because it was a persistent development
+environment: a database that outlives a session, fixed ports a client app
+points at, dev fixtures, the mail listing. None of that is graphql-specific,
+so the package provides it and graphql's `docker/` goes
+(`docs/superpowers/plans/2026-09-29-fa-ci-package-plan-3a.md`).
+
+The model is imscp's development stack: one fixed mount of the folder that
+holds the plugins, and an opt-in list that decides which of them are live.
+
+- **`docker/ci/plugin-dev.sh [--env NAME] [--config FILE] <command>`** runs
+  named, persistent environments from the CI image:
+  - container `fa-dev-<env>`, with its MariaDB datadir on the volume
+    `fa-dev-<env>-db`;
+  - Apache on `127.0.0.1:<port>`;
+  - `<env>` defaults to `dev`.
+- **The modules mount.** The `modules/` folder of a FrontAccounting checkout
+  (`FA_DEV_MODULES_ROOT`, default: the checkout `plugin-dev.sh` is in) is
+  bind-mounted **at `/var/www/html/modules`**, so an edit on the host is live
+  on the next request.
+  - It goes at FA's own path, not elsewhere with symlinks as in imscp,
+    because FA plugins locate FA through their real path
+    (`dirname(__DIR__, 4)`, `$path_to_root = '../..'`).
+  - FA only loads the extensions registered in `installed_extensions.php`, so
+    the other folders sit there harmlessly.
+- **Opt-in:** `FA_DEV_MODULES`, a space-separated list of folders under
+  `modules/`, is registered and activated in that order.
+  - `link` applies a changed list to a running environment: it activates
+    what's newly listed and deactivates what's no longer listed. There's no
+    container rebuild and no data loss.
+  - A plugin checked out elsewhere is mounted over `modules/NAME` with
+    `FA_DEV_MOUNTS`.
+- **Settings** come from the environment's config file,
+  `docker/ci/dev/<env>.env` (gitignored; `docker/ci/dev/example.env` is
+  committed), and `FA_DEV_*` variables set in the shell take precedence.
+  - Mounts, themes, port, image and dataset apply when the environment is
+    created; the module list applies on `up` and `link`.
+  - `FA_DEV_THEMES` names folders of `FA_DEV_THEMES_ROOT` (default: the
+    checkout's `themes/`) to mount under `themes/`.
+  - `FA_DEV_PORT` defaults to 8100.
+  - `FA_DEV_DATASET` is `test`, `demo`, or a `.sql`/`.sql.gz` backup. It loads
+    only into a new database volume. A backup is loaded as it is; only the
+    `test`/`test` login (role 2) is added.
+  - `FA_DEV_EXTENSIONS` is an `installed_extensions.php`, typically a live
+    site's. It gives the modules the extension ids it lists for them, so a
+    copy of that site's database keeps its users' access. Activation still
+    follows `FA_DEV_MODULES`' order, and unlisted modules get ids after every
+    id the file has used.
+  - `FA_DEV_INIT` (default `yes`): after activation, each activated module's
+    own `tools/init.sh`, if it has one, runs in its directory. `no` skips it,
+    e.g. for a copy of live.
+  - `FA_DEV_MOUNTS`, and `FA_DEV_IMAGE`, `FA_DEV_FA`, `FA_DEV_PHP`.
+- **Commands:**
+  - `up`: create, or start and `link`;
+  - `link`, `activate`;
+  - `down`;
+  - `destroy --yes`: the container and the volume;
+  - `status`, `url`;
+  - `shell`, `exec [--dir D] <cmd>`: as the caller's uid with group
+    www-data, in the FA tree or D under it;
+  - `logs [app|errors]`;
+  - `mail [list|show <file>|clear]`;
+  - `db dump [file]`, `db load <file>` (then re-activates, and re-runs the
+    inits), `db shell`.
+- **Behaviour:**
+  - Re-activation marks the modules inactive first, because FA runs a
+    module's install SQL only when it becomes active.
+  - If creation fails once the container exists, the environment is kept for
+    inspection.
+- **Package helpers:**
+  - `fa-ci-register --id N`: fails if another module has that id;
+  - `fa-ci-dataset <path in the container>`;
+  - `fa-ci-ext-list <installed_extensions.php>`: prints `id package`;
+  - `fa-ci-deactivate <name>`: FA's own form, as `fa-ci-activate`.
+- **Out of scope:** xdebug and phpMyAdmin (`db shell` covers the database),
+  and module clones (modules come from the checkout, or `FA_DEV_MOUNTS`).
+- **graphql:**
+  - The config-and-seed steps move to `tools/init.sh`, shared by
+    `tools/ci.sh` and the dev convention.
+  - The dev fixtures move to `tools/dev-fixtures.sh` and `tools/fixtures.php`.
+  - `docker/` is deleted.
+  - Its dev environment is `docker/ci/dev/graphql.env` in the FA checkout:
+    `FA_DEV_MODULES="sgw_sales graphql"`, port 8100, which the
+    saygoweb.com-my client's `FA_ENDPOINT` already uses.
+
+## §7 Rehearsing a live upgrade on a dev environment (plan 3B)
+
+After plan 3A, master-ark takes master-cp (so it has the package), and
+`docker/upgrade/rehearse` drives a dev environment instead of the old
+`docker/fa` stack (`docs/superpowers/plans/2026-09-29-fa-ci-package-plan-3b.md`).
+It is executed after plan 3A is merged.
+
+- **Image:** `build-image.sh cp 7.4 fa-ci:ark-7.4`, run in the master-ark
+  checkout, which yields master-ark's 2.4.20 code.
+- **Environment:** `bms-rehearsal`, on port 8300. `rehearse up` writes its
+  settings to the environment's config file,
+  `docker/ci/dev/bms-rehearsal.env`, so `plugin-dev.sh --env bms-rehearsal`
+  commands (`activate`, `link`) use the same settings:
+  - the modules mount is the main checkout's `modules/`;
+  - `FA_DEV_MODULES="sgw_sales sgw_import graphql"`;
+  - `FA_DEV_THEMES=bootstrap`;
+  - the live backup as `FA_DEV_DATASET`;
+  - live's `installed_extensions.php` as `FA_DEV_EXTENSIONS`;
+  - `FA_DEV_INIT=no`, so no dev users are seeded into the copy of live.
+- **What activation does:** it applies each module's upgrade SQL through FA,
+  as the real upgrade will. `rehearse migrate` then adds the core
+  preferences, and `rehearse check` reports before and after.
+- **Failures:** a failed activation (e.g. sgw_sales 1.4 on duplicate
+  schedules) leaves the environment up. `check` reports the cause, and
+  `plugin-dev.sh --env bms-rehearsal activate` retries once it is fixed.
+- Only the `0_` table prefix is supported. `check` reports what the backup
+  uses.

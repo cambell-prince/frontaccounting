@@ -50,4 +50,12 @@ expect_status 0 "tmp/errors.log is writable by group www-data from the start" do
     'test -f /var/www/html/tmp/errors.log && test "$(stat -c %G /var/www/html/tmp/errors.log)" = www-data && test -n "$(find /var/www/html/tmp/errors.log -perm -g+w)"'
 expect_status 0 "the test uid can append to tmp/errors.log" docker exec "$c" \
     setpriv --reuid=4242 --regid=4242 --groups=33 sh -c 'echo ci-append >> /var/www/html/tmp/errors.log'
+expect_status 0 "loads a dump file as the dataset, as it is" docker exec "$c" sh -c '
+    mariadb-dump fa_test | gzip > /tmp/before.sql.gz &&
+    mariadb fa_test -e "CREATE TABLE 0_ci_after (id int)" &&
+    fa-ci-dataset /tmp/before.sql.gz &&
+    ! mariadb -N fa_test -e "SHOW TABLES LIKE \"0_ci_after\"" | grep -q . &&
+    mariadb -N fa_test -e "SELECT CONCAT(\"login=\", user_id) FROM 0_users WHERE user_id = \"test\""'
+expect_contains "with the test login" "login=test" "$OUT"
+expect_status 2 "a missing dataset file is refused" docker exec "$c" fa-ci-dataset /tmp/no-such.sql
 finish

@@ -1,0 +1,45 @@
+#!/bin/sh
+# fa-ci-deactivate <name>: deactivate a module for company 0 through
+# FrontAccounting's own Setup -> Install/Activate Extensions form, so its
+# deactivate_extension() runs as it would on a real install. Every other
+# active module is sent ticked, so it stays active. Fails unless FrontAccounting
+# then lists the module as inactive.
+set -eu
+[ "$#" -eq 1 ] || { echo "usage: fa-ci-deactivate <name>" >&2; exit 2; }
+name="$1"
+root="${FA_ROOT:-/var/www/html}"
+url="${FA_URL:-http://localhost}"
+list="$root/company/0/installed_extensions.php"
+jar="$(mktemp)"
+page="$(mktemp)"
+trap 'rm -f "$jar" "$page"' EXIT
+
+# The extension ids to send ticked: everything active now except $name.
+# shellcheck disable=SC2016 # expands in PHP, not the shell
+ids="$(php -r '
+    $installed_extensions = array();
+    include $argv[1];
+    $found = false;
+    foreach ($installed_extensions as $id => $e) {
+        if ($e["package"] === $argv[2]) $found = true;
+        elseif (!empty($e["active"])) echo $id, "\n";
+    }
+    exit($found ? 0 : 1);' "$list" "$name")" \
+    || { echo "fa-ci-deactivate: $name is not registered" >&2; exit 1; }
+
+fa-ci-login "$jar"
+set -- --data-urlencode extset=0 --data-urlencode Refresh=Update
+for id in $ids; do set -- "$@" --data-urlencode "Active$id=1"; done
+curl -fsS -c "$jar" -b "$jar" -o "$page" "$@" "$url/admin/inst_module.php"
+
+# shellcheck disable=SC2016 # expands in PHP, not the shell
+if php -r '
+    $installed_extensions = array();
+    include $argv[1];
+    foreach ($installed_extensions as $e)
+        if ($e["package"] === $argv[2] && !empty($e["active"])) exit(0);
+    exit(1);' "$list" "$name"; then
+    echo "fa-ci-deactivate: FrontAccounting did not deactivate $name" >&2
+    exit 1
+fi
+echo "deactivated $name"

@@ -55,6 +55,38 @@ it is), `--setup`, `--no-activate`, `--name`, and `--mount HOST:CONTAINER`.
 `--keep` leaves the container running, with FrontAccounting on a printed
 localhost port (sign in as `test`/`test`).
 
+## Development environments
+
+`plugin-dev.sh` keeps FrontAccounting running between sessions from the same
+image. It mounts your checkout's whole `modules/` folder, so edits are live on
+the next request. Its database is on a volume, and it listens on a fixed port.
+Which modules are extensions in it is opt-in, in `docker/ci/dev/<env>.env`:
+
+    cp docker/ci/dev/example.env docker/ci/dev/dev.env    # then edit FA_DEV_MODULES
+    docker/ci/plugin-dev.sh up          # create it, or start it again
+    docker/ci/plugin-dev.sh link        # after changing FA_DEV_MODULES
+    docker/ci/plugin-dev.sh status
+    docker/ci/plugin-dev.sh shell
+    docker/ci/plugin-dev.sh exec --dir modules/graphql composer test
+    docker/ci/plugin-dev.sh mail list
+    docker/ci/plugin-dev.sh down        # stop; the data stays
+    docker/ci/plugin-dev.sh destroy --yes
+
+`--env NAME` keeps several side by side, each with its own
+`docker/ci/dev/NAME.env`, port and database. After activation, each module's
+own `tools/init.sh` (if it has one) runs in its directory.
+
+A copy of a real site: set `FA_DEV_DATASET` to its backup and
+`FA_DEV_EXTENSIONS` to its `installed_extensions.php`. The modules then keep
+the extension ids the site's security roles were built with. Set
+`FA_DEV_INIT=no` to add nothing to the copy. Sign in as your own users, or
+as `test`/`test`. Mail is caught (`mail list`), never sent.
+
+`db dump [file]` writes the database out. `db load <file>` replaces it and
+activates the modules again, so their install SQL runs on the new data.
+`activate` does that without a load, e.g. after fixing whatever stopped an
+activation.
+
 ## What a run does
 
 1. Mounts the plugin at `/var/www/html/modules/<name>`. `<name>` comes from

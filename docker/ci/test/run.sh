@@ -5,7 +5,7 @@
 #   docker/ci/test/run.sh [<image>]
 #
 # prune.sh needs no image and always runs. With an image (the argument, else
-# $FA_CI_IMAGE) image.sh, attach.sh and driver.sh run against it.
+# $FA_CI_IMAGE) image.sh, attach.sh, driver.sh and dev.sh run against it.
 
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,8 +23,9 @@ if [ -n "$image" ]; then
     run image.sh
     run attach.sh
     run driver.sh
+    run dev.sh
 else
-    printf '\n(no image given: skipped image.sh, attach.sh, driver.sh)\n'
+    printf '\n(no image given: skipped image.sh, attach.sh, driver.sh, dev.sh)\n'
 fi
 
 if [ "${#failed[@]}" -gt 0 ]; then
