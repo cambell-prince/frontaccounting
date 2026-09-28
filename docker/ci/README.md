@@ -36,6 +36,8 @@ Inputs:
 - `test` (required) and `setup`: commands.
 - `with`: other modules, one `NAME=REPO@REF` per line.
 - `fa`, `php`: which image to use.
+- `dataset`: `test` (the image's `fa_test`, the default) or `demo`
+  (FrontAccounting's demo company, with fiscal years reaching today).
 - `image`: overrides `fa` and `php`, e.g. a pinned `-<sha>` tag.
 - `fa-ref`: which revision of these scripts drives the run.
 - `activate: false` and `name`: for a checkout that isn't an FA extension.
@@ -47,7 +49,7 @@ From the plugin's checkout, with this repository checked out beside it:
 
     ../frontaccounting/docker/ci/plugin-test.sh --setup 'composer install' . -- sh tools/ci.sh
 
-The same options as the workflow: `--fa`, `--php`, `--image`,
+The same options as the workflow: `--fa`, `--php`, `--dataset`, `--image`,
 `--with NAME=REPO@REF` or `--with NAME=../path` (a local checkout, used as
 it is), `--setup`, `--no-activate`, `--name`, and `--mount HOST:CONTAINER`.
 `--keep` leaves the container running, with FrontAccounting on a printed
@@ -58,20 +60,29 @@ localhost port (sign in as `test`/`test`).
 1. Mounts the plugin at `/var/www/html/modules/<name>`. `<name>` comes from
    `class hooks_<name>` in its `hooks.php`, which is how FrontAccounting finds
    it. Each `--with` module is mounted beside it.
-2. Runs `composer install --no-dev` in each cloned `--with` module, then `--setup`.
-3. Registers and activates the `--with` modules in order, then the plugin,
+2. With `--dataset demo`, replaces the database with FrontAccounting's demo
+   company and adds the `test`/`test` login.
+3. Runs `composer install --no-dev` in each cloned `--with` module, then `--setup`.
+4. Registers and activates the `--with` modules in order, then the plugin,
    through FrontAccounting's own Setup → Install/Activate Extensions. So each
    module's `activate_extension()` and `update_*.sql` run as on a real install,
-   and **a failed activation fails the run**. Then gives the admin role every
-   area.
-4. Runs the test command in the plugin's directory.
+   and **a failed activation fails the run**. Then gives the `test` user a
+   role of its own, `FA CI`, holding every area; role 2 stays as the dataset
+   has it.
+5. Runs the test command in the plugin's directory.
 
 Commands run as your uid:gid with group `www-data` added, so they can write
 to the FA tree (`config_db.php`, `company/`, `tmp/`), and files they leave in
 your checkout stay yours. The environment has:
 - `FA_ROOT=/var/www/html` and `FA_URL=http://localhost`;
 - `FA_DB_HOST`, `FA_DB_NAME`, `FA_DB_USER` and `FA_DB_PASSWORD` (`localhost`,
-  `fa_test`, `fa`, `fa`).
+  `fa_test`, `fa`, `fa`), and `FA_DB_PREFIX=0_`.
+
+Helpers for a plugin's own setup: `fa-ci-ext-id <module>` prints a module's
+extension id, which follows activation order, so derive security codes from
+it: section `(id << 16) | (100 << 8)`, first area `section | 100`.
+`fa-ci-grant --role <id> --module <name>` adds a module's sections and areas
+to a role, e.g. role 2 for a dataset user your tests sign in as.
 
 `fa-ci-login <cookie-jar>` signs in over HTTP. Mail from PHP's `mail()` is
 kept in `/var/mail-catcher/*.eml`. On failure the run prints the tails of FA's

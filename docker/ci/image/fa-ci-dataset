@@ -1,0 +1,47 @@
+#!/bin/sh
+# fa-ci-dataset <test|demo>: replace the fa_test database with a dataset.
+#
+#   test  the fixture the image was seeded with (modules/tests/data/fa_test.sql.gz)
+#   demo  FrontAccounting's own sql/en_US-demo.sql: customers, items, orders.
+#         Its fiscal years end in the past, so years are appended until one
+#         covers today, and a test/test login (role 2) is added for the
+#         package's helpers. The demo admin/password stays as it is.
+#
+# Run as root, before modules are activated, so their update SQL runs on it.
+set -eu
+[ "$#" -eq 1 ] || { echo "usage: fa-ci-dataset <test|demo>" >&2; exit 2; }
+db="${FA_DB_NAME:-fa_test}"
+
+case "$1" in
+    test) load() { gunzip -c /usr/local/share/fa-ci/fa_test.sql.gz; } ;;
+    demo) load() { cat "${FA_ROOT:-/var/www/html}/sql/en_US-demo.sql"; } ;;
+    *) echo "fa-ci-dataset: the dataset is test or demo, not '$1'" >&2; exit 2 ;;
+esac
+
+mariadb -e "DROP DATABASE IF EXISTS \`$db\`; CREATE DATABASE \`$db\`;"
+load | mariadb "$db"
+
+mariadb "$db" <<'SQL'
+INSERT INTO `0_users` (`user_id`, `password`, `real_name`, `role_id`, `email`, `language`)
+SELECT 'test', MD5('test'), 'FA CI', 2, 'test@example.com', 'C'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `0_users` WHERE `user_id` = 'test');
+SQL
+
+added=0
+while [ "$(mariadb -N "$db" -e "SELECT COUNT(*) FROM \`0_fiscal_year\` WHERE CURDATE() BETWEEN \`begin\` AND \`end\`")" = 0 ]; do
+    [ "$added" -lt 30 ] || { echo "fa-ci-dataset: no fiscal year reaches today after $added" >&2; exit 1; }
+    mariadb "$db" -e "INSERT INTO \`0_fiscal_year\` (\`begin\`, \`end\`, \`closed\`)
+        SELECT MAX(\`end\`) + INTERVAL 1 DAY, MAX(\`end\`) + INTERVAL 1 YEAR, 0 FROM \`0_fiscal_year\`
+        HAVING MAX(\`end\`) IS NOT NULL"
+    added=$((added + 1))
+done
+if [ "$added" -gt 0 ]; then
+    mariadb "$db" -e "UPDATE \`0_sys_prefs\` SET \`value\` =
+        (SELECT id FROM \`0_fiscal_year\` WHERE CURDATE() BETWEEN \`begin\` AND \`end\` LIMIT 1)
+        WHERE \`name\` = 'f_year'"
+fi
+if [ "$added" -gt 0 ]; then
+    echo "dataset $1 loaded ($added fiscal year(s) added to reach today)"
+else
+    echo "dataset $1 loaded"
+fi

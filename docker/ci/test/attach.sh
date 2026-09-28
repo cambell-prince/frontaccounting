@@ -48,10 +48,31 @@ expect_contains "naming the module" "did not activate ci_broken" "$OUT"
 expect_status 1 "an unregistered module is refused" act ci_nothing
 expect_contains "saying why" "not registered" "$OUT"
 
-expect_status 0 "grants the admin role every area" docker exec "$c" fa-ci-grant
-expect_contains "reporting the count" "granted " "$OUT"
+expect_status 0 "prints ci_alpha's extension id" docker exec "$c" fa-ci-ext-id ci_alpha
+expect_contains "ci_alpha is extension 1" "1" "$OUT"
+expect_status 0 "prints ci_beta's extension id" docker exec "$c" fa-ci-ext-id ci_beta
+expect_contains "ci_beta is extension 2" "2" "$OUT"
+expect_status 1 "an unregistered module has no id" docker exec "$c" fa-ci-ext-id ci_nothing
+
+expect_status 0 "grants the test user every area" docker exec "$c" fa-ci-grant
+expect_contains "to role FA CI" "to role FA CI" "$OUT"
 # ci_alpha is extension 1, so FA maps its area to (1<<16)|(100<<8)|100.
-expect_status 0 "role 2 holds ci_alpha's area" sql \
-    "SELECT 'has-area' FROM 0_security_roles WHERE id = 2 AND FIND_IN_SET('91236', REPLACE(areas, ';', ','))"
+expect_status 0 "role FA CI holds ci_alpha's area" sql \
+    "SELECT 'has-area' FROM 0_security_roles WHERE role = 'FA CI' AND FIND_IN_SET('91236', REPLACE(areas, ';', ','))"
 expect_contains "code 91236" "has-area" "$OUT"
+expect_status 0 "the test user is on role FA CI" sql \
+    "SELECT 'on-fa-ci' FROM 0_users u JOIN 0_security_roles r ON r.id = u.role_id WHERE u.user_id = 'test' AND r.role = 'FA CI'"
+expect_contains "user test" "on-fa-ci" "$OUT"
+expect_status 0 "role 2 is untouched" sql \
+    "SELECT 'has-area' FROM 0_security_roles WHERE id = 2 AND FIND_IN_SET('91236', REPLACE(areas, ';', ','))"
+expect_absent "role 2 lacks ci_alpha's area" "has-area" "$OUT"
+
+expect_status 0 "grants one module's areas to a role" docker exec "$c" fa-ci-grant --role 2 --module ci_alpha
+expect_contains "reporting what it granted" "of ci_alpha to role 2" "$OUT"
+expect_status 0 "role 2 now holds ci_alpha's section and area" sql \
+    "SELECT 'has-both' FROM 0_security_roles WHERE id = 2 AND FIND_IN_SET('91236', REPLACE(areas, ';', ',')) AND FIND_IN_SET('91136', REPLACE(sections, ';', ','))"
+expect_contains "codes 91136 and 91236" "has-both" "$OUT"
+expect_status 0 "granting again adds nothing" docker exec "$c" fa-ci-grant --role 2 --module ci_alpha
+expect_contains "zero the second time" "granted 0 areas of ci_alpha to role 2" "$OUT"
+expect_status 2 "a malformed grant is refused" docker exec "$c" fa-ci-grant --role two --module ci_alpha
 finish
