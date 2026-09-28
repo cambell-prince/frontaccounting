@@ -19,12 +19,15 @@ module_name() {
 }
 
 # ci_diagnostics <container>: what FrontAccounting and Apache logged, for a
-# failed run.
+# failed run. Sets CI_DIAGNOSED=yes so a caller's own cleanup (e.g.
+# plugin-test.sh's trap) can skip printing it again.
 ci_diagnostics() {
     printf '\n--- FrontAccounting tmp/errors.log\n' >&2
     docker exec "$1" sh -c 'tail -n 60 /var/www/html/tmp/errors.log 2>/dev/null' >&2 || true
     printf '\n--- Apache error.log\n' >&2
     docker exec "$1" sh -c 'tail -n 60 /var/log/apache2/error.log 2>/dev/null' >&2 || true
+    # shellcheck disable=SC2034 # read by callers' own cleanup, e.g. plugin-test.sh
+    CI_DIAGNOSED=yes
 }
 
 # ci_boot <container> <image> [docker run args...]: start the image and wait

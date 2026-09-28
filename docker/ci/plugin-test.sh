@@ -120,7 +120,7 @@ fi
 
 cleanup() {
     local rc=$?
-    [ "$rc" -eq 0 ] || ci_diagnostics "$CONTAINER"
+    [ "$rc" -eq 0 ] || [ "${CI_DIAGNOSED:-}" = yes ] || ci_diagnostics "$CONTAINER"
     if [ "$KEEP" = yes ] && docker inspect "$CONTAINER" >/dev/null 2>&1; then
         log "leaving $CONTAINER running: http://$(docker port "$CONTAINER" 80 | head -n 1)/ (test/test);" \
             "docker exec -it $CONTAINER bash; docker rm -f $CONTAINER when done"

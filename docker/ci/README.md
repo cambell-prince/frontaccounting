@@ -5,7 +5,7 @@ plugin's tests run with, modelled on `saygoweb/imscp`'s `docker/ci`.
 
 | piece | what it is |
 | --- | --- |
-| `ghcr.io/cambell-prince/frontaccounting-ci:<flavour>-php<ver>` | Apache, PHP, MariaDB and FrontAccounting with `fa_test` seeded, in one container. `<flavour>` is `cp` (this fork, master-cp) or `upstream` (FrontAccountingERP/FA master); `<ver>` is `7.4` or `8.3`. Each build is also tagged `-<sha7>`, to pin. |
+| `ghcr.io/cambell-prince/frontaccounting-ci:<flavour>-php<ver>` | Apache, PHP, MariaDB and FrontAccounting with `fa_test` seeded, in one container. `<flavour>` is `cp` (this fork, master-cp) or `upstream` (FrontAccountingERP/FA master); `<ver>` is `7.4` or `8.3`. Each build is also tagged `-<sha7>`, to pin: that tag is pushed once and never replaced (weekly rebuilds refresh only the moving `<flavour>-php<ver>` tag), and for `upstream` images the sha is this fork's commit, not upstream FrontAccounting's (the `io.frontaccounting.commit` label records that). |
 | `plugin-test.sh` | runs a plugin's tests in that image, locally or in CI |
 | `.github/workflows/plugin-test.yml` | the same, as a reusable workflow |
 | `.github/workflows/ci-image.yml` | builds, smoke-tests, publishes and prunes the images |

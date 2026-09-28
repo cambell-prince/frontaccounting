@@ -101,6 +101,11 @@ jobs:
       - name: Push
         run: |
           for tag in ${{ steps.tags.outputs.tags }}; do
+              if echo "$tag" | grep -qE -- '-[0-9a-f]{7}$' \
+                  && docker buildx imagetools inspect "$tag" >/dev/null 2>&1; then
+                  echo "keeping existing $tag (pinned tags are immutable)"
+                  continue
+              fi
               docker push "$tag"
           done
 

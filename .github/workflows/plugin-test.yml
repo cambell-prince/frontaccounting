@@ -89,10 +89,22 @@ jobs:
           CLONE_TOKEN: ${{ secrets.clone-token }}
         run: |
           # SSH-style URLs work here too: there is no SSH key, so use https.
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          # insteadOf rewrites don't chain, so with a token both prefixes map
+          # straight to the token URL; without one, git@ still maps to https.
           if [ -n "$CLONE_TOKEN" ]; then
               git config --global url."https://x-access-token:${CLONE_TOKEN}@github.com/".insteadOf "https://github.com/"
+              git config --global --add url."https://x-access-token:${CLONE_TOKEN}@github.com/".insteadOf "git@github.com:"
+          else
+              git config --global url."https://github.com/".insteadOf "git@github.com:"
           fi
+      - name: Pull the CI image
+        env:
+          FA_CI_IMAGE: ${{ inputs.image }}
+          FA: ${{ inputs.fa }}
+          PHP: ${{ inputs.php }}
+        run: |
+          image="${FA_CI_IMAGE:-ghcr.io/cambell-prince/frontaccounting-ci:$FA-php$PHP}"
+          docker pull "$image"
       - name: Test
         env:
           COMPOSER_CACHE_DIR: ${{ runner.temp }}/composer-cache
