@@ -77,6 +77,8 @@ expect_contains "the demo admin" "admin" "$OUT"
 expect_contains "and the package's test login" "test" "$OUT"
 expect_contains "ci_alpha activated on top" "alpha-installed" "$OUT"
 expect_contains "a fiscal year covers today" "today-covered" "$OUT"
+expect_status 0 "--dataset demo keeps the general collation" "$d" --dataset demo "$fx/ci_alpha" -- 'mariadb -h localhost -u fa -pfa -N -e "SELECT DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = \"fa_test\""'
+expect_contains "general_ci after the reload" "utf8mb4_general_ci" "$OUT"
 expect_status 1 "an unknown dataset is refused" "$d" --dataset nope "$fx/ci_alpha" -- true
 expect_contains "naming the choices" "test or demo" "$OUT"
 expect_status 0 "no container is left behind" sh -c "! docker ps -a --format '{{.Names}}' | grep -q '^fa-ci-ci_'"

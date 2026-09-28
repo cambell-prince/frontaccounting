@@ -43,4 +43,6 @@ expect_status 0 "Apache creates group-writable files" docker exec "$c" sh -c '. 
 expect_status 0 "the mail catcher's directory is not sticky" docker exec "$c" sh -c 'test "$(stat -c %a /var/mail-catcher)" = 777'
 expect_status 0 "errors are logged, not displayed, and notices are off" docker exec "$c" php -r \
     'exit((ini_get("display_errors") == "" || ini_get("display_errors") == "0") && !(error_reporting() & E_NOTICE) && ini_get("memory_limit") === "512M" ? 0 : 1);'
+expect_status 0 "databases default to utf8mb4_general_ci, as the plugins' old stacks did" docker exec "$c" mariadb -N -e "SELECT DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'fa_test'"
+expect_contains "fa_test's collation" "utf8mb4_general_ci" "$OUT"
 finish
