@@ -15,54 +15,16 @@ The test suite is far (very far) from complete. In fact, it has only just begun.
 
 You can have a look at our current [Code Coverage](https://rawgit.com/wiki/cambell-prince/frontaccounting/code_coverage/index.html).  The code coverage report is updated manually from time to time and may not be up to date.  The Code Coverage report only reflects code covered by the PHPUnit tests.  It does not report on code covered by the E2E tests.
 
-### Travis CI Integration and Automation
+### Running the tests
 
-The tests have a travis configuration which is [running here](https://travis-ci.org/cambell-prince/frontaccounting).
+The PHPUnit suite runs in the docker test stack (see `docker/README.md`):
 
-Note that the travis build pulls the latest code from the branch 'master-cp' from https://github.com/cambell-prince/frontaccounting.
+	docker/fa up
+	docker/fa test
 
-The travis testing is done using phantomjs on the Travis node rather than chrome, as Travis nodes are headless.
+or `make.phar test` from the top of the checkout, which does the same.
 
-The version of webdriver currently installed is not the latest as that runs too quickly and does not work well with the ajax library used by Front Accounting.  See the .travis_yml file for details.
-
-### Installation & Operation
-
-#### For the PHPUnit Tests
-
- * Install the dependencies (if not installed)
-
-		npm install
-		composer install
-
- * Run the PHPUnit tests (via gulp)
-
-		gulp test-php
-    
-#### For the E2E Tests
-
- * Install the dependencies (if not installed)
-
-		npm install
-
- * Start the local php server
-
-		sh build-startServer
-
- * Start the local web driver
-
-		webdrive-manager start
-
- * Run the E2E tests using the Chrome web driver
-
-		gulp test-chrome
-
-#### Installing NodeJS and Gulp
-
-npm is the Node Package Manager and comes installed as part of 'nodejs'.  The task runner used here is 'gulp' which can be installed via the Node Package Manager, npm.
-
-If you don't have nodejs and npm installed you can get it on a debian / ubuntu system by:
-
-````
-apt-get install nodejs
-npm install -g gulp
-````
+The Protractor E2E tests under `e2e/` are not run any more. They need node 10,
+selenium 3 and PhantomJS, and the gulp tasks and Travis configuration that drove
+them were removed along with gulp; they are in the history before
+`makefile.json` if the suite is revived.

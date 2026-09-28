@@ -55,12 +55,11 @@ puts ownership right if it ever drifts anyway.
 | `demo` | `sql/en_US-demo.sql` | admin / password |
 | a path | any `.sql` or `.sql.gz` | — |
 
-`test` is the same fixture the gulpfile's `env-db` task uses, so the PHPUnit
-suite runs against a freshly seeded stack. `docker/fa db dump` writes a gzipped
+`test` is the fixture the PHPUnit suite is written against, so it runs
+against a freshly seeded stack. `docker/fa db dump` writes a gzipped
 dump back out.
 
-Unlike `gulp env-test`, none of this copies fixture files over your `config.php`
-or `config_db.php`.
+None of this copies fixture files over your `config.php` or `config_db.php`.
 
 **The database has to be called `fa_test`** for the PHPUnit suite to run at all.
 `TestEnvironment::isGoodToGo()` skips every test against any other name, so that
@@ -135,8 +134,8 @@ and the suite goes back to erroring 7/7.
 ## Not included
 
 The Protractor end-to-end suite. It is pinned to node 10 and selenium 3 (see
-`modules/tests/README.md`) and wants a browser and a webdriver alongside; the
-gulp tasks still drive it on the host. Only the PHPUnit side runs here.
+`modules/tests/README.md`) and nothing drives it any more. Only the PHPUnit
+side runs here.
 
 ## Relationship to `.devcontainer`
 

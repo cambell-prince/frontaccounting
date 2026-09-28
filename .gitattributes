@@ -19,7 +19,8 @@
 .gitignore export-ignore
 .project export-ignore
 .buildpath export-ignore
-.travis.yml export-ignore
-gulpfile.js export-ignore
-package.json export-ignore
 modules/tests export-ignore
+makefile.json export-ignore
+deploy export-ignore
+docker export-ignore
+upload-exclude.txt export-ignore
