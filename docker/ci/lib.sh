@@ -42,3 +42,35 @@ ci_boot() {
         die "$image did not become ready"
     fi
 }
+
+# ci_as_user <container> <dir> <command>: sh -c <command> in <dir> as the caller,
+# with group www-data added, umask 002 and HOME=/tmp; composer's cache too when
+# CI_COMPOSER_CACHE=yes (the caller mounted it at /tmp/composer-cache).
+ci_as_user() {
+    local env=(-e HOME=/tmp)
+    [ "${CI_COMPOSER_CACHE:-}" != yes ] || env+=(-e COMPOSER_CACHE_DIR=/tmp/composer-cache)
+    docker exec -w "$2" "${env[@]}" "$1" \
+        setpriv --reuid="$(id -u)" --regid="$(id -g)" --groups=33 \
+        sh -c "umask 002; $3"
+}
+
+# ci_activate <container> <module[:id]>...: register each module (under that
+# extension id when given) and activate it through FrontAccounting, in order,
+# then give the test user every area.
+ci_activate() {
+    local c="$1" m name id
+    shift
+    for m in "$@"; do
+        name="${m%%:*}"
+        id=''
+        [ "$name" = "$m" ] || id="${m#*:}"
+        log "activating $name${id:+ as extension $id}"
+        if [ -n "$id" ]; then
+            docker exec -u www-data "$c" fa-ci-register --id "$id" "$name" "modules/$name"
+        else
+            docker exec -u www-data "$c" fa-ci-register "$name" "modules/$name"
+        fi
+        docker exec "$c" fa-ci-activate "$name"
+    done
+    docker exec "$c" fa-ci-grant
+}

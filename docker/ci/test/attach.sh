@@ -98,4 +98,41 @@ expect_contains "codes 68608 and 68709" "has-both" "$OUT"
 expect_status 0 "granting again adds nothing" docker exec "$c" fa-ci-grant --role 2 --module ci_alpha
 expect_contains "zero the second time" "granted 0 areas of ci_alpha to role 2" "$OUT"
 expect_status 2 "a malformed grant is refused" docker exec "$c" fa-ci-grant --role two --module ci_alpha
+
+expect_status 0 "registers with a chosen id" docker exec -u www-data "$c" fa-ci-register --id 9 ci_gamma modules/ci_gamma
+expect_contains "as extension 9" "registered ci_gamma as extension 9" "$OUT"
+expect_status 0 "the next registration follows the highest id" docker exec -u www-data "$c" fa-ci-register ci_delta modules/ci_delta
+expect_contains "as extension 10" "registered ci_delta as extension 10" "$OUT"
+expect_status 1 "an id another module has is refused" docker exec -u www-data "$c" fa-ci-register --id 1 ci_epsilon modules/ci_epsilon
+expect_contains "naming who has it" "extension 1 is ci_alpha" "$OUT"
+expect_status 1 "a module keeps the id it has" docker exec -u www-data "$c" fa-ci-register --id 4 ci_alpha modules/ci_alpha
+expect_contains "saying so" "ci_alpha is extension 1, not 4" "$OUT"
+expect_status 0 "the same module and id again is a no-op" docker exec -u www-data "$c" fa-ci-register --id 9 ci_gamma modules/ci_gamma
+expect_contains "already registered" "already registered as extension 9" "$OUT"
+
+state() { docker exec "$c" php -r 'include "/var/www/html/company/0/installed_extensions.php"; foreach ($installed_extensions as $e) echo $e["package"], "=", $e["active"] ? "on" : "off", "\n";'; }
+expect_status 0 "deactivates a module through FA's form" docker exec "$c" fa-ci-deactivate ci_beta
+expect_contains "saying so" "deactivated ci_beta" "$OUT"
+expect_status 0 "reads the lists" state
+expect_contains "ci_beta is off" "ci_beta=off" "$OUT"
+expect_contains "ci_alpha stays on" "ci_alpha=on" "$OUT"
+expect_status 0 "deactivating again is a no-op" docker exec "$c" fa-ci-deactivate ci_beta
+expect_status 1 "an unregistered module is refused" docker exec "$c" fa-ci-deactivate ci_nothing
+expect_contains "saying why" "not registered" "$OUT"
+expect_status 0 "and it activates again" docker exec "$c" fa-ci-activate ci_beta
+
+docker exec -i "$c" sh -c "cat > /tmp/ext.php" <<'PHP'
+<?php
+$next_extension_id = 8;
+$installed_extensions = array (
+  0 => array ('package' => 'chart_en_AU', 'name' => 'chart', 'version' => '-', 'available' => '', 'type' => 'chart', 'active' => false, 'path' => 'sql'),
+  5 => array ('package' => 'sgw_sales', 'name' => 'sgw_sales', 'version' => '-', 'available' => '', 'type' => 'extension', 'path' => 'modules/sgw_sales', 'active' => false),
+  3 => array ('package' => 'sgw_import', 'name' => 'sgw_import', 'version' => '-', 'available' => '', 'type' => 'extension', 'path' => 'modules/sgw_import', 'active' => false),
+);
+PHP
+expect_status 0 "lists the extensions of an installed_extensions.php" docker exec "$c" fa-ci-ext-list /tmp/ext.php
+expect_contains "sgw_sales as 5" "5 sgw_sales" "$OUT"
+expect_contains "sgw_import as 3" "3 sgw_import" "$OUT"
+expect_absent "not the chart" "chart_en_AU" "$OUT"
+expect_status 0 "in the file's order" test "$(printf '%s\n' "$OUT" | head -n 1)" = "5 sgw_sales"
 finish
