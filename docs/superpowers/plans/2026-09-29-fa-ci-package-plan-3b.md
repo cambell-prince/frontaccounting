@@ -6,7 +6,7 @@
 
 **Goal:** Rehearse the 2.4.3 → 2.4.20 production upgrade of bms.saygoweb.com on a copy of the live database. It runs in a package development environment on master-ark's own code, with graphql, sgw_sales, sgw_import and the bootstrap theme, and live's extension ids.
 
-**Architecture:** The master-ark upgrade branch takes master-cp, which brings the package. `build-image.sh cp` run in that checkout builds an image of master-ark's code. `docker/upgrade/rehearse` is rewritten as a thin wrapper over `plugin-dev.sh`: the backup is the dataset, live's `installed_extensions.php` gives the ids, and activation applies the modules' upgrade SQL through FA as the real upgrade will. `rehearse migrate` adds the core preferences, and `rehearse check` reports before and after.
+**Architecture:** The master-ark upgrade branch takes master-cp, which brings the package. `build-image.sh cp` run in that checkout builds an image of master-ark's code. `docker/upgrade/rehearse` is rewritten as a thin wrapper over `plugin-dev.sh`. It writes the environment's config file (`docker/ci/dev/<env>.env`). In it: the main checkout's `modules/` is the modules mount; sgw_sales, sgw_import and graphql are the opt-in list; the backup is the dataset; live's `installed_extensions.php` gives the ids; and module inits are off. Activation applies the modules' upgrade SQL through FA, as the real upgrade will. `rehearse migrate` adds the core preferences, and `rehearse check` reports before and after.
 
 **Tech Stack:** bash, Docker, the FA CI package (`docker/ci`), MariaDB, FrontAccounting master-ark (2.4.20).
 
@@ -16,8 +16,9 @@
 
 - Branch `merge/master-cp-into-master-ark` in `/home/cambell/src/sgw/frontaccounting/.claude/worktrees/merge-ark`. It is never pushed to `master-ark`; fast-forwarding master-ark is the user's decision after the rehearsal.
 - Image `fa-ci:ark-7.4`, from `docker/ci/build-image.sh cp 7.4 fa-ci:ark-7.4` run in that worktree.
-- Environment `bms-rehearsal` (`plugin-dev.sh --env bms-rehearsal`), default port 8300. graphql's dev environment keeps 8100.
-- Modules come from the local checkouts under `REHEARSE_MODULES`, default `/home/cambell/src/sgw/frontaccounting/modules`: `sgw_sales`, `sgw_import`, `graphql`, activated in that order. The theme comes from `REHEARSE_THEMES/bootstrap`, default `/home/cambell/src/sgw/frontaccounting/themes`. The checkouts must be on the branches the release uses (`makefile.json` components) and have `vendor/` installed.
+- Environment `bms-rehearsal` (`plugin-dev.sh --env bms-rehearsal`, `REHEARSE_ENV` to change it), default port 8300. graphql's dev environment keeps 8100.
+- The modules mount is `REHEARSE_MODULES_ROOT` (default `/home/cambell/src/sgw/frontaccounting/modules`, the main checkout's `modules/`). Of its folders, `FA_DEV_MODULES="sgw_sales sgw_import graphql"` are activated, in that order. The theme is `bootstrap` from `REHEARSE_THEMES_ROOT` (default `/home/cambell/src/sgw/frontaccounting/themes`). Those checkouts must be on the branches the release uses (`makefile.json` components) and have `vendor/` installed.
+- `rehearse up` writes the environment's settings to `docker/ci/dev/<env>.env`, which is gitignored and holds absolute paths, with `FA_DEV_INIT=no` so nothing dev-only is seeded into the copy of live. `plugin-dev.sh --env <env> activate` then retries with the same settings. `rehearse destroy` removes the file along with the environment.
 - Only the `0_` table prefix is supported. `rehearse check` reports the prefix the backup uses.
 - Nothing here touches production. The live backup and live's `installed_extensions.php` are copies the user supplies.
 - `core.fileMode=false`: record executable modes with `git update-index --chmod=+x`.
@@ -85,7 +86,7 @@ If a package test fails because master-ark's own code differs from master-cp (it
 - Modify: `docker/upgrade/README.md` (the rehearsal section)
 
 **Interfaces:**
-- Consumes (Task 1): `fa-ci:ark-7.4` and `docker/ci/plugin-dev.sh` (`up --env --port --image --dataset <file> --extensions <file> --with --theme`, `exec`, `status`, `url`, `down`, `destroy --yes`, `activate`), plus the existing `docker/upgrade/00-preflight.sql` and `10-core-2.4.20.sql`.
+- Consumes (Task 1): `fa-ci:ark-7.4` and `docker/ci/plugin-dev.sh` (`--env NAME`; the config file `docker/ci/dev/NAME.env` with `FA_DEV_MODULES`, `FA_DEV_MODULES_ROOT`, `FA_DEV_THEMES`, `FA_DEV_THEMES_ROOT`, `FA_DEV_DATASET`, `FA_DEV_EXTENSIONS`, `FA_DEV_IMAGE`, `FA_DEV_PORT`, `FA_DEV_INIT`; the commands `up`, `activate`, `exec`, `url`, `down`, `destroy --yes`, `mail`), plus the existing `docker/upgrade/00-preflight.sql` and `10-core-2.4.20.sql`.
 - Produces:
 
 ```
@@ -116,23 +117,24 @@ root="$(cd "$here/../../.." && pwd)"
 r="$here/../rehearse"
 dev="$root/docker/ci/plugin-dev.sh"
 TMP_A="$(mktemp -d)"
-export XDG_CACHE_HOME="$TMP_A/cache"
 export REHEARSE_ENV="rehearsetest$$"
+cfg="$root/docker/ci/dev/$REHEARSE_ENV.env"
+mods="${REHEARSE_MODULES_ROOT:-/home/cambell/src/sgw/frontaccounting/modules}"
 port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
-trap '"$r" destroy >/dev/null 2>&1 || true; rm -rf "$TMP_A"' EXIT
+trap '"$r" destroy >/dev/null 2>&1 || true; rm -f "$cfg"; rm -rf "$TMP_A"' EXIT
 
 # A 2.4.3 site: master-ark's own schema from before the 2.4.20 merge.
 backup="$TMP_A/live.sql"
 {
     git -C "$root" show bc7ef07d:sql/en_US-new.sql
     echo "SET SESSION sql_mode='';"
-    cat "${REHEARSE_MODULES:-/home/cambell/src/sgw/frontaccounting/modules}/sgw_sales/sql/update_1.0.sql"
+    cat "$mods/sgw_sales/sql/update_1.0.sql"
     echo "INSERT INTO \`0_sales_recurring\` (trans_no,dt_start,dt_end,dt_next,auto,every,repeats,occur) VALUES
       (720,'2024-01-01','0000-00-00','2026-10-01',1,1,'year','1'),
       (720,'2024-01-01','0000-00-00','2026-10-01',1,1,'year','1'),
       (721,'2024-02-01','2027-01-31','0000-00-00',1,1,'month','1');"
     sed -e '/^SET AUTOCOMMIT/d;/^START TRANSACTION/d;/^COMMIT/d' \
-        "${REHEARSE_MODULES:-/home/cambell/src/sgw/frontaccounting/modules}/sgw_import/data/0.1.0.sql"
+        "$mods/sgw_import/data/0.1.0.sql"
     # Live's admin role holds sgw_sales' section and its three areas as extension 1.
     echo "UPDATE \`0_security_roles\` SET sections = CONCAT(sections, ';91136'), areas = CONCAT(areas, ';91236;91237;91238') WHERE id = 2;"
 } > "$backup"
@@ -146,18 +148,21 @@ $installed_extensions = array (
 PHP
 
 expect_status 2 "a missing file is refused" "$r" up "$TMP_A/nope.sql" "$TMP_A/installed_extensions.php" --port "$port"
-expect_status 0 "and nothing was created" sh -c "! docker inspect fa-dev-$REHEARSE_ENV >/dev/null 2>&1"
+expect_status 0 "and nothing was created" sh -c "! docker inspect fa-dev-$REHEARSE_ENV >/dev/null 2>&1 && ! test -e '$cfg'"
 
 expect_status 1 "up stops at sgw_sales' 1.4 on the duplicate schedule" "$r" up "$backup" "$TMP_A/installed_extensions.php" --port "$port"
 expect_contains "naming sgw_sales" "did not activate sgw_sales" "$OUT"
 expect_status 0 "the environment stays for inspection" docker inspect "fa-dev-$REHEARSE_ENV"
+expect_status 0 "its settings are in the environment's config file" grep -q '^FA_DEV_INIT=no$' "$cfg"
+expect_status 0 "the whole modules folder is mounted" "$dev" --env "$REHEARSE_ENV" exec 'ls modules'
+expect_contains "a module not activated is there too" "tests" "$OUT"
 expect_status 0 "check lists the duplicate" "$r" check
 expect_contains "order 720" "720" "$OUT"
 expect_contains "the prefix" "0_" "$OUT"
 
 expect_status 0 "fix the duplicate by hand" "$dev" --env "$REHEARSE_ENV" exec \
     "mariadb -h localhost -u fa -pfa fa_test -e 'DELETE FROM 0_sales_recurring WHERE trans_no = 720 ORDER BY id DESC LIMIT 1'"
-expect_status 0 "activate carries on" "$dev" --env "$REHEARSE_ENV" activate
+expect_status 0 "activate carries on, from the config file alone" env -u FA_DEV_MODULES "$dev" --env "$REHEARSE_ENV" activate
 expect_status 0 "migrate adds the core preferences" "$r" migrate
 expect_status 0 "check after" "$r" check
 expect_contains "7 of 7 preferences" "| 2.4.20 prefs already present (of 7) |      7 |" "$OUT"
@@ -178,7 +183,11 @@ expect_status 0 "up again keeps the rehearsal" "$r" up "$backup" "$TMP_A/install
 expect_status 0 "the fix is still there" "$dev" --env "$REHEARSE_ENV" exec \
     "mariadb -h localhost -u fa -pfa -N fa_test -e 'SELECT COUNT(*) FROM 0_sales_recurring WHERE trans_no = 720'"
 expect_contains "one schedule" "1" "$OUT"
+expect_status 0 "no dev users were seeded into the copy of live" "$dev" --env "$REHEARSE_ENV" exec \
+    "mariadb -h localhost -u fa -pfa -N fa_test -e 'SELECT COUNT(*) FROM 0_users WHERE user_id = \"apitest\"'"
+expect_contains "none" "0" "$OUT"
 expect_status 0 "destroy" "$r" destroy
+expect_status 0 "removes the environment and its config file" sh -c "! docker inspect fa-dev-$REHEARSE_ENV >/dev/null 2>&1 && ! test -e '$cfg'"
 finish
 ```
 
@@ -207,22 +216,25 @@ Expected: it FAILs from "a missing file is refused", because the current `rehear
 #   docker/upgrade/rehearse migrate   the core preferences (the modules' SQL runs at activation)
 #   docker/upgrade/rehearse url | down | destroy
 #
-# up builds the image fa-ci:ark-7.4 from this checkout if it isn't there, then
-# creates the environment (REHEARSE_ENV, default bms-rehearsal) from the backup,
-# with live's extension ids, and activates sgw_sales, sgw_import and graphql
-# from the checkouts under REHEARSE_MODULES and the bootstrap theme from
-# REHEARSE_THEMES. Activation runs each module's upgrade SQL through FA, as
-# the real upgrade will; if one fails, the environment stays up: `check`, fix,
-# then `docker/ci/plugin-dev.sh --env <env> activate`.
+# up builds the image fa-ci:ark-7.4 from this checkout if it isn't there,
+# writes the environment's settings (REHEARSE_ENV, default bms-rehearsal) to
+# docker/ci/dev/<env>.env, and creates it: the backup as its database, live's
+# extension ids, the modules folder REHEARSE_MODULES_ROOT mounted with
+# sgw_sales, sgw_import and graphql activated, and the bootstrap theme from
+# REHEARSE_THEMES_ROOT. Activation runs each module's upgrade SQL through FA,
+# as the real upgrade will; if one fails, the environment stays up: `check`,
+# fix, then `docker/ci/plugin-dev.sh --env <env> activate`.
 
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 dev="$root/docker/ci/plugin-dev.sh"
 ENV_NAME="${REHEARSE_ENV:-bms-rehearsal}"
-MODULES="${REHEARSE_MODULES:-/home/cambell/src/sgw/frontaccounting/modules}"
-THEMES="${REHEARSE_THEMES:-/home/cambell/src/sgw/frontaccounting/themes}"
+CONFIG="$root/docker/ci/dev/$ENV_NAME.env"
+MODULES="${REHEARSE_MODULES_ROOT:-/home/cambell/src/sgw/frontaccounting/modules}"
+THEMES="${REHEARSE_THEMES_ROOT:-/home/cambell/src/sgw/frontaccounting/themes}"
 IMAGE="${REHEARSE_IMAGE:-fa-ci:ark-7.4}"
+abs() { echo "$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"; }
 
 die() { printf 'rehearse: %s\n' "$*" >&2; exit 1; }
 # sql <file>: run a SQL file against the environment's database. plugin-dev.sh
@@ -241,16 +253,27 @@ cmd_up() {
     [ -f "$extensions" ] || { printf 'rehearse: no such file: %s\n' "$extensions" >&2; exit 2; }
     local m
     for m in sgw_sales sgw_import graphql; do
-        [ -f "$MODULES/$m/hooks.php" ] || die "no $m checkout in $MODULES (set REHEARSE_MODULES)"
+        [ -f "$MODULES/$m/hooks.php" ] || die "no $m checkout in $MODULES (set REHEARSE_MODULES_ROOT)"
         [ -d "$MODULES/$m/vendor" ] || die "$MODULES/$m has no vendor/: run composer install --no-dev there"
     done
-    [ -d "$THEMES/bootstrap" ] || die "no bootstrap theme in $THEMES (set REHEARSE_THEMES)"
+    [ -d "$THEMES/bootstrap" ] || die "no bootstrap theme in $THEMES (set REHEARSE_THEMES_ROOT)"
     docker image inspect "$IMAGE" >/dev/null 2>&1 \
         || "$root/docker/ci/build-image.sh" cp 7.4 "$IMAGE"
-    "$dev" --env "$ENV_NAME" up --port "$port" --image "$IMAGE" \
-        --dataset "$backup" --extensions "$extensions" \
-        --with "sgw_sales=$MODULES/sgw_sales" --with "sgw_import=$MODULES/sgw_import" \
-        --with "graphql=$MODULES/graphql" --theme "bootstrap=$THEMES/bootstrap"
+    # The environment's own config file, so plugin-dev.sh --env <env> activate
+    # (and link) use these settings too.
+    {
+        echo "# Written by docker/upgrade/rehearse up; removed by rehearse destroy."
+        printf 'FA_DEV_MODULES_ROOT=%q\n' "$(abs "$MODULES")"
+        echo 'FA_DEV_MODULES="sgw_sales sgw_import graphql"'
+        printf 'FA_DEV_THEMES_ROOT=%q\n' "$(abs "$THEMES")"
+        echo 'FA_DEV_THEMES=bootstrap'
+        printf 'FA_DEV_DATASET=%q\n' "$(abs "$backup")"
+        printf 'FA_DEV_EXTENSIONS=%q\n' "$(abs "$extensions")"
+        printf 'FA_DEV_IMAGE=%q\n' "$IMAGE"
+        printf 'FA_DEV_PORT=%q\n' "$port"
+        echo 'FA_DEV_INIT=no'
+    } > "$CONFIG"
+    "$dev" --env "$ENV_NAME" up
 }
 
 cmd_check() {
@@ -276,15 +299,18 @@ case "$cmd" in
     migrate) cmd_migrate ;;
     url) "$dev" --env "$ENV_NAME" url ;;
     down) "$dev" --env "$ENV_NAME" down ;;
-    destroy) "$dev" --env "$ENV_NAME" destroy --yes ;;
-    *) sed -n '2,19p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+    destroy) "$dev" --env "$ENV_NAME" destroy --yes; rm -f "$CONFIG" ;;
+    *) sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
 esac
 ```
 
 - [ ] **Step 4: Run the test**
 
 Run: `docker/upgrade/test/rehearse.sh`
-Expected: `0 failed`. `rehearse destroy` leaves no `fa-dev-rehearsetest*` container or volume.
+Expected: `0 failed`. `rehearse destroy` leaves no `fa-dev-rehearsetest*` container, volume or `docker/ci/dev/rehearsetest*.env`.
+
+Run: `docker run --rm -v "$PWD":/mnt -w /mnt koalaman/shellcheck:stable -x docker/upgrade/rehearse docker/upgrade/test/rehearse.sh`
+Expected: clean.
 
 - [ ] **Step 5: README**
 
@@ -305,10 +331,14 @@ modules' extension ids, which live's security roles were built with.
 
 `up` builds the image `fa-ci:ark-7.4` from this checkout if it isn't there,
 then loads the backup and activates sgw_sales, sgw_import and graphql, as the
-real upgrade will. Their upgrade SQL runs through FrontAccounting. The modules
-come from `/home/cambell/src/sgw/frontaccounting/modules/*` (`REHEARSE_MODULES`)
-and the bootstrap theme from `themes/bootstrap` (`REHEARSE_THEMES`). They must
-be on the branches the release uses and have `vendor/` installed.
+real upgrade will. Their upgrade SQL runs through FrontAccounting. The
+modules folder mounted is `/home/cambell/src/sgw/frontaccounting/modules`
+(`REHEARSE_MODULES_ROOT`), and the bootstrap theme comes from `themes/`
+(`REHEARSE_THEMES_ROOT`). Those checkouts must be on the branches the release
+uses and have `vendor/` installed. The settings are written to
+`docker/ci/dev/bms-rehearsal.env`, so `plugin-dev.sh --env bms-rehearsal`
+commands use them too. Module inits are off (`FA_DEV_INIT=no`), so no dev users
+are added to the copy.
 
 If an activation fails, e.g. sgw_sales 1.4 on an order with two schedules,
 the environment stays up:
@@ -319,7 +349,7 @@ the environment stays up:
 
 Then browse `docker/upgrade/rehearse url` (port 8300), signing in as your own
 users. Mail is caught, never sent (`plugin-dev.sh --env bms-rehearsal mail list`).
-`rehearse down` stops it and `rehearse destroy` removes it.
+`rehearse down` stops it, and `rehearse destroy` removes it and its config file.
 ````
 
 Also remove the old text about `docker/fa up` and `docker/fa db reset` from the rest of the file.

@@ -2,53 +2,64 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use cjp:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task, wave by wave per the Execution Schedule. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give the package persistent development environments (`docker/ci/plugin-dev.sh`), so any plugin, or several together with a copy of a live database, can be run and browsed locally. Then retire graphql's own `docker/` stack onto it.
+**Goal:** Give the package persistent development environments (`docker/ci/plugin-dev.sh`). The host's `modules/` folder is mounted whole into FrontAccounting, edits are live, and a list you opt into decides which modules are active, including on a copy of a live database. Then retire graphql's own `docker/` stack onto it.
 
-**Architecture:** `plugin-dev.sh` runs the same image as `plugin-test.sh`, but as a named container (`fa-dev-<env>`) with its database on a named volume and Apache on a fixed port. Both scripts share `--with` resolution, run-as-you, and activation through new functions in `lib.sh`. Three small in-image helpers support backups and live extension ids. graphql moves its config-and-seed and dev-fixture steps into `tools/`.
+**Architecture:** Following imscp's development stack, `plugin-dev.sh` bind-mounts the `modules/` folder of a FrontAccounting checkout at `/var/www/html/modules` in a named container (`fa-dev-<env>`). Its database is on a named volume and Apache is on a fixed port. `FA_DEV_MODULES`, read from `docker/ci/dev/<env>.env` or the shell, lists the modules to register and activate through FA. `link` applies a changed list without recreating anything. `plugin-test.sh` and `plugin-dev.sh` share run-as-you and activation through `lib.sh`, and four small in-image helpers support backups, live extension ids and deactivation. graphql moves its setup and dev fixtures into `tools/`.
 
-**Tech Stack:** bash/sh, Docker (named volumes, labels), MariaDB, PHP CLI helpers, the existing docker/ci test harness.
+**Tech Stack:** bash/sh, Docker (bind mounts, named volumes, labels), MariaDB, PHP CLI helpers, the existing `docker/ci` test harness.
 
 **Spec:** `docs/superpowers/specs/2026-09-28-fa-ci-package-design.md` (§6; §1-§5 for context)
 
 ## Global Constraints
 
-- Container `fa-dev-<env>`, volume `fa-dev-<env>-db` mounted at `/var/lib/mysql`, Apache published on `127.0.0.1:<port>`, default port 8100.
-- `<env>` defaults to the module name of the plugin checkout given to `up`, else of the current directory, else `fa`.
-- Clones of `--with NAME=REPO@REF` persist under `${XDG_CACHE_HOME:-$HOME/.cache}/fa-ci/dev/<env>/<name>`.
-- Container labels record the environment: `fa-dev.port`, `fa-dev.plugin` (module name or empty), `fa-dev.modules` (space-separated `name[:id]` in activation order), `fa-dev.init` (the `--init` command or empty).
-- Datasets: `test` (the image's fa_test), `demo` (FA's demo company), or a host path to `.sql`/`.sql.gz`. A file is loaded as it is, plus the `test`/`test` login on role 2. It loads only when the volume is new.
-- Commands inside the environment run as the host uid:gid with group www-data (33), `umask 002`, `HOME=/tmp`, like `plugin-test.sh`.
-- `destroy` refuses without `--yes`.
-- If creation fails once the container exists, the environment stays for inspection.
-- `plugin-test.sh`'s behaviour and its test suite (`docker/ci/test/driver.sh`) must not change, apart from sharing code through `lib.sh`.
+- Container `fa-dev-<env>`, volume `fa-dev-<env>-db` at `/var/lib/mysql`, Apache on `127.0.0.1:<FA_DEV_PORT>` (default 8100). The default env is `dev`.
+- The modules mount: `FA_DEV_MODULES_ROOT` (default `<the checkout plugin-dev.sh is in>/modules`) goes at `/var/www/html/modules`, **not** elsewhere with symlinks. FA plugins resolve FA through their real path.
+- Settings come from `docker/ci/dev/<env>.env` (or `--config FILE`). `FA_DEV_*` variables already in the shell win over the file. `docker/ci/dev/*.env` is gitignored; `docker/ci/dev/example.env` is committed.
+- Settings and defaults:
+  - `FA_DEV_MODULES` (empty)
+  - `FA_DEV_MODULES_ROOT`
+  - `FA_DEV_THEMES` (empty)
+  - `FA_DEV_THEMES_ROOT` (`<checkout>/themes`)
+  - `FA_DEV_PORT` (8100)
+  - `FA_DEV_DATASET` (`test`)
+  - `FA_DEV_EXTENSIONS` (empty)
+  - `FA_DEV_INIT` (`yes`)
+  - `FA_DEV_MOUNTS` (empty)
+  - `FA_DEV_IMAGE` (default from `FA_DEV_FA`, `cp`, and `FA_DEV_PHP`, `7.4`)
+- These apply only at creation: the mounts, themes, port, image and dataset. The module list applies on `up` and `link`. A dataset loads only into a new volume.
+- Activation follows `FA_DEV_MODULES`' order. With `FA_DEV_EXTENSIONS`, the listed ids are kept, and unlisted modules get ids after every id the file has used.
+- Re-activation after the database changed first marks the modules inactive, because FA runs a module's install SQL only when it becomes active.
+- The init convention: after activation, each activated module's `tools/init.sh`, if present, runs in its directory, unless `FA_DEV_INIT=no`.
+- Commands inside run as the host uid:gid with group www-data (33), `umask 002`, `HOME=/tmp`.
+- `destroy` refuses without `--yes`. A failed creation keeps the environment.
+- `plugin-test.sh`'s behaviour and `docker/ci/test/driver.sh` must not change, apart from sharing code through `lib.sh`.
 - Every repo has `core.fileMode=false`. Record executable modes with `git update-index --chmod=+x <file>` after `git add`.
-- Name scratch directories for what they are (`TMP_A=$(mktemp -d)`). Never assign one to `HOME`. Tests set `XDG_CACHE_HOME` to a scratch dir, so a user's real cache is never touched.
+- Scratch dirs get their own names (`TMP_A=$(mktemp -d)`), never `HOME`. Tests never touch the user's real checkout or config.
 - The machine thermally throttles, so run one docker build or suite at a time.
 - Commit as `git -c user.name=Cambell -c user.email=cambell.prince@gmail.com commit ...` with the trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Review Focus
 
-- `up` on an environment that already exists must start it and leave its database alone, even if a `--dataset` is passed. Test: Task 2, "up again keeps the data".
-- A port that is already taken must fail with a clear message that names the port, not a raw docker error. Test: Task 2, "a busy port is reported".
-- `--extensions` naming a module that isn't provided, or a provided module it doesn't name, must neither fail nor shift the ids of the listed modules. Test: Task 3, "unlisted modules come after, listed ids hold".
-- `db load` of a backup must leave the environment's modules active again, because the load replaced their tables. Test: Task 3, "db load re-activates".
-- `destroy --yes` must remove the container, the volume and the clone directory, and nothing else. Other environments stay. Test: Task 2, "destroy removes only this environment".
+- An edit on the host must show on the next request, with no restart. Test: Task 2, "an edit on the host is live".
+- Changing `FA_DEV_MODULES` and running `link` must activate and deactivate modules without recreating the container. Test: Task 2, "link applies a smaller list" and "the same container".
+- `up` on an existing environment must keep its database, even with a different `FA_DEV_DATASET`. Test: Task 2, "up again keeps the data".
+- `db load` of a dump that lacks a module's tables must leave the module working. Its install SQL must run again, which requires the inactive-then-active step. Test: Task 2, "db load re-runs the modules' install SQL".
+- `FA_DEV_EXTENSIONS`: listed ids hold, an unlisted module gets an id after the file's ids, and activation keeps `FA_DEV_MODULES`' order even when the file lists them differently. Test: Task 2, the extension-id cases.
 
 ## Execution Schedule
 
 | Wave | Tasks | Model | Notes |
 |------|-------|-------|-------|
-| 1 | Task 1 | sonnet | Shared `lib.sh` functions (with `plugin-test.sh` switched onto them) and the in-image helpers. Complete code given. |
-| 2 | Task 2 | opus | `plugin-dev.sh` core. Judgment around docker lifecycle and failure handling. |
-| 3 | Task 3 | sonnet | `plugin-dev.sh` data commands and the README. Same file as Task 2, so a later wave. |
-| CP1 | — | — | plan base..end of wave 3: code-review medium + spec check (spec §6, package part). Must finish before wave 4, which builds on the contract. |
-| 4 | Task 4 | opus | graphql moves onto the dev mode (graphql repo). |
-| CP2 | — | — | plan base..end of wave 4 in both repos: code-review medium + spec check (full §6). |
-| 5 | Controller | — | FA PR, CI, merge when the user says, then republish. graphql PR, CI, merge when the user says. Then help the user move their dev data and stop the old stack. |
+| 1 | Task 1 | sonnet | Shared `lib.sh` functions (`plugin-test.sh` switched onto them) and the in-image helpers. Complete code given. |
+| 2 | Task 2 | opus | `plugin-dev.sh`: environments, the modules mount, `link`, data commands, README. Judgment around docker lifecycle and failures. |
+| CP1 | — | — | plan base..end of wave 2: code-review medium + spec check (spec §6, package part). Must finish before wave 3, which builds on it. |
+| 3 | Task 3 | opus | graphql moves onto the dev mode (graphql repo). |
+| CP2 | — | — | plan base..end of wave 3 in both repos: code-review medium + spec check (full §6). |
+| 4 | Controller | — | FA PR, CI, merge when the user says, then republish. graphql PR, CI, merge when the user says. Then, with the user's go-ahead, move their old graphql dev stack's data into the new environment. |
 
 Worktrees:
 - FA fork: `/home/cambell/src/sgw/frontaccounting/.claude/worktrees/ci-dev`, branch `feature/ci-dev` from `origin/master-cp`. This is where this plan lives.
-- graphql: `/home/cambell/src/sgw/frontaccounting/.claude/worktrees/graphql-dev`, branch `dev/fa-ci-dev` from `origin/main`. The controller creates it before wave 4.
+- graphql: `/home/cambell/src/sgw/frontaccounting/.claude/worktrees/graphql-dev`, branch `dev/fa-ci-dev` from `origin/main`. The controller creates it before wave 3.
 
 `$FA_CI` below means `/home/cambell/src/sgw/frontaccounting/.claude/worktrees/ci-dev/docker/ci`. The local test image is `fa-ci:local-cp-7.4`, rebuilt from the FA worktree with `docker/ci/build-image.sh cp 7.4 fa-ci:local-cp-7.4` whenever `docker/ci/image/*` or the Dockerfile changes.
 
@@ -57,22 +68,22 @@ Worktrees:
 ### Task 1: Shared functions and in-image helpers
 
 **Files (FA worktree):**
-- Modify: `docker/ci/lib.sh` (add `ci_with_resolve`, `ci_as_user`, `ci_activate`)
+- Modify: `docker/ci/lib.sh` (add `ci_as_user`, `ci_activate`)
 - Modify: `docker/ci/plugin-test.sh` (use them; behaviour unchanged)
 - Modify: `docker/ci/image/fa-ci-register` (`--id N`)
 - Modify: `docker/ci/image/fa-ci-dataset` (a file path as the dataset)
-- Create: `docker/ci/image/fa-ci-ext-list`
+- Create: `docker/ci/image/fa-ci-ext-list`, `docker/ci/image/fa-ci-deactivate`
 - Test: `docker/ci/test/attach.sh`, `docker/ci/test/image.sh`; `docker/ci/test/driver.sh` unchanged, as the regression guard
 
 **Interfaces:**
-- Consumes: the merged package (plan 2): `log`, `die`, `ci_boot`, `ci_diagnostics`, `fa_ci_image`, `module_name` in `lib.sh`, plus the image helpers.
+- Consumes: the merged package: `log`, `die`, `ci_boot`, `ci_diagnostics`, `fa_ci_image` and `module_name` in `lib.sh`; the in-image `fa-ci-login`, `fa-ci-register`, `fa-ci-activate`, `fa-ci-grant` and `fa-ci-dataset`.
 - Produces:
-  - `ci_with_resolve <work-dir> <reserved-name> <spec>...` sets the global arrays `CI_WITH_NAMES`, `CI_WITH_PATHS` and `CI_WITH_CLONED`. It reuses an existing clone at `<work-dir>/<name>` if one is there.
-  - `ci_as_user <container> <dir> <command>` runs `sh -c` as the caller. It passes `COMPOSER_CACHE_DIR=/tmp/composer-cache` when `CI_COMPOSER_CACHE=yes`.
-  - `ci_activate <container> <module[:id]>...` registers each module (with the id when given) and activates it, in order, then runs `fa-ci-grant`.
-  - `fa-ci-register [--id N] <name> <path>` prints `registered <name> as extension <id>`. It exits 1 with `extension <N> is <other>` if the id is taken by another module, and with `<name> is extension <M>, not <N>` if the module is already registered under a different id.
+  - `ci_as_user <container> <dir> <command>`: `sh -c` as the caller. It passes `COMPOSER_CACHE_DIR=/tmp/composer-cache` when `CI_COMPOSER_CACHE=yes`.
+  - `ci_activate <container> <module[:id]>...`: registers each module (under the id when given) and activates it, in order, then runs `fa-ci-grant`.
+  - `fa-ci-register [--id N] <name> <path>`: prints `registered <name> as extension <id>`. It exits 1 with `extension <N> is <other>` if the id is taken, or `<name> is extension <M>, not <N>`.
   - `fa-ci-dataset <test|demo|/abs/path.sql[.gz]>`: a file is loaded as it is, plus the `test` login.
-  - `fa-ci-ext-list <file>` prints `<id> <package>` for each `'type' => 'extension'` entry, in the file's order.
+  - `fa-ci-ext-list <file>`: `<id> <package>` for each `'type' => 'extension'` entry, in the file's order.
+  - `fa-ci-deactivate <name>`: prints `deactivated <name>`. It exits 1 with `FrontAccounting did not deactivate <name>`, or `<name> is not registered`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -89,6 +100,17 @@ expect_status 1 "a module keeps the id it has" docker exec -u www-data "$c" fa-c
 expect_contains "saying so" "ci_alpha is extension 1, not 4" "$OUT"
 expect_status 0 "the same module and id again is a no-op" docker exec -u www-data "$c" fa-ci-register --id 9 ci_gamma modules/ci_gamma
 expect_contains "already registered" "already registered as extension 9" "$OUT"
+
+state() { docker exec "$c" php -r 'include "/var/www/html/company/0/installed_extensions.php"; foreach ($installed_extensions as $e) echo $e["package"], "=", $e["active"] ? "on" : "off", "\n";'; }
+expect_status 0 "deactivates a module through FA's form" docker exec "$c" fa-ci-deactivate ci_beta
+expect_contains "saying so" "deactivated ci_beta" "$OUT"
+expect_status 0 "reads the lists" state
+expect_contains "ci_beta is off" "ci_beta=off" "$OUT"
+expect_contains "ci_alpha stays on" "ci_alpha=on" "$OUT"
+expect_status 0 "deactivating again is a no-op" docker exec "$c" fa-ci-deactivate ci_beta
+expect_status 1 "an unregistered module is refused" docker exec "$c" fa-ci-deactivate ci_nothing
+expect_contains "saying why" "not registered" "$OUT"
+expect_status 0 "and it activates again" docker exec "$c" fa-ci-activate ci_beta
 
 docker exec "$c" sh -c "cat > /tmp/ext.php" <<'PHP'
 <?php
@@ -122,7 +144,7 @@ expect_status 2 "a missing dataset file is refused" docker exec "$c" fa-ci-datas
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `docker/ci/build-image.sh cp 7.4 fa-ci:local-cp-7.4 && FA_CI_IMAGE=fa-ci:local-cp-7.4 docker/ci/test/image.sh; FA_CI_IMAGE=fa-ci:local-cp-7.4 docker/ci/test/attach.sh`
-Expected: the new checks FAIL: `--id` is taken as the module name, `fa-ci-ext-list` is not found, and the dataset file is refused as an unknown dataset.
+Expected: the new checks FAIL. `--id` is taken as the module name, `fa-ci-deactivate` and `fa-ci-ext-list` are not found, and the dataset file is refused.
 
 - [ ] **Step 3: The in-image helpers**
 
@@ -167,15 +189,9 @@ if ($want !== null) {
 }
 ```
 
-Change `save_extensions("$root/installed_extensions.php", $global, $id + 1);` to:
+Change `save_extensions("$root/installed_extensions.php", $global, $id + 1);` to `save_extensions("$root/installed_extensions.php", $global, max((int) $next, $id + 1));`. Update the header comment: `--id N` registers under that id (a live site's), refuses an id another module holds, and moves `$next_extension_id` past it.
 
-```php
-save_extensions("$root/installed_extensions.php", $global, max((int) $next, $id + 1));
-```
-
-Update the header comment: document `--id N`, which registers under that id (a live site's), refuses an id another module holds, and moves `$next_extension_id` past it.
-
-`docker/ci/image/fa-ci-dataset`: change the usage lines and the `case`:
+`docker/ci/image/fa-ci-dataset`: change the header comment and the argument handling to:
 
 ```sh
 # fa-ci-dataset <test|demo|/path/to/file.sql[.gz]>: replace the fa_test database with a dataset.
@@ -188,9 +204,8 @@ Update the header comment: document `--id N`, which registers under that id (a l
 #         changed, and its fiscal years are left alone.
 #
 # Every dataset gets a test/test login (role 2) for the package's helpers.
-```
-
-```sh
+# Run as root, before modules are activated, so their update SQL runs on it.
+set -eu
 [ "$#" -eq 1 ] || { echo "usage: fa-ci-dataset <test|demo|/path/to/file.sql[.gz]>" >&2; exit 2; }
 db="${FA_DB_NAME:-fa_test}"
 src="$1"
@@ -210,7 +225,7 @@ case "$src" in
 esac
 ```
 
-Wrap the existing fiscal-year loop and its `f_year` update in `if [ "$extend_years" = yes ]; then ... fi`. Keep the `test` user insert unconditional. Keep the final message, printing `dataset $src loaded`.
+Wrap the existing fiscal-year loop and its `f_year` update in `if [ "$extend_years" = yes ]; then ... fi`. Keep the `test` user insert unconditional. Print `dataset $src loaded`, plus the years added when there were any.
 
 `docker/ci/image/fa-ci-ext-list`:
 
@@ -230,52 +245,61 @@ php -r '
         if (($e["type"] ?? "") === "extension") echo $id, " ", $e["package"], "\n";' "$1"
 ```
 
-Run: `chmod +x docker/ci/image/fa-ci-ext-list`.
+`docker/ci/image/fa-ci-deactivate`:
+
+```sh
+#!/bin/sh
+# fa-ci-deactivate <name>: deactivate a module for company 0 through
+# FrontAccounting's own Setup -> Install/Activate Extensions form, so its
+# deactivate_extension() runs as it would on a real install. Every other
+# active module is sent ticked, so it stays active. Fails unless FrontAccounting
+# then lists the module as inactive.
+set -eu
+[ "$#" -eq 1 ] || { echo "usage: fa-ci-deactivate <name>" >&2; exit 2; }
+name="$1"
+root="${FA_ROOT:-/var/www/html}"
+url="${FA_URL:-http://localhost}"
+list="$root/company/0/installed_extensions.php"
+jar="$(mktemp)"
+page="$(mktemp)"
+trap 'rm -f "$jar" "$page"' EXIT
+
+# The extension ids to send ticked: everything active now except $name.
+ids="$(php -r '
+    $installed_extensions = array();
+    include $argv[1];
+    $found = false;
+    foreach ($installed_extensions as $id => $e) {
+        if ($e["package"] === $argv[2]) $found = true;
+        elseif (!empty($e["active"])) echo $id, "\n";
+    }
+    exit($found ? 0 : 1);' "$list" "$name")" \
+    || { echo "fa-ci-deactivate: $name is not registered" >&2; exit 1; }
+
+fa-ci-login "$jar"
+set -- --data-urlencode extset=0 --data-urlencode Refresh=Update
+for id in $ids; do set -- "$@" --data-urlencode "Active$id=1"; done
+curl -fsS -c "$jar" -b "$jar" -o "$page" "$@" "$url/admin/inst_module.php"
+
+if php -r '
+    $installed_extensions = array();
+    include $argv[1];
+    foreach ($installed_extensions as $e)
+        if ($e["package"] === $argv[2] && !empty($e["active"])) exit(0);
+    exit(1);' "$list" "$name"; then
+    echo "fa-ci-deactivate: FrontAccounting did not deactivate $name" >&2
+    exit 1
+fi
+echo "deactivated $name"
+```
+
+Run: `chmod +x docker/ci/image/fa-ci-ext-list docker/ci/image/fa-ci-deactivate`.
 
 - [ ] **Step 4: The shared functions in `lib.sh`**
 
 Append to `docker/ci/lib.sh`:
 
 ```bash
-# ci_with_resolve <work-dir> <reserved-name> <spec>...
-#
-# Resolves --with specs, NAME=PATH (a local checkout, used as it is) or
-# NAME=REPO@REF (cloned into <work-dir>/<name>; the ref is the part after the
-# last @; an existing clone there is reused). Sets the global arrays
-# CI_WITH_NAMES, CI_WITH_PATHS (absolute) and CI_WITH_CLONED (the names that
-# were cloned). Dies on a malformed spec or one naming <reserved-name>.
-ci_with_resolve() {
-    local work="$1" reserved="$2" spec dep src repo ref path
-    shift 2
-    CI_WITH_NAMES=()
-    CI_WITH_PATHS=()
-    CI_WITH_CLONED=()
-    for spec in "$@"; do
-        dep="${spec%%=*}"
-        src="${spec#*=}"
-        [ -n "$dep" ] && [ "$dep" != "$spec" ] && [ -n "$src" ] \
-            || die "--with takes NAME=REPO@REF or NAME=PATH, not '$spec'"
-        [ "$dep" != "$reserved" ] || die "--with $dep: $dep is the plugin under test"
-        if [ -d "$src" ]; then
-            path="$(cd "$src" && pwd)"
-        else
-            repo="${src%@*}"
-            ref="${src##*@}"
-            [ "$repo" != "$src" ] && [ -n "$ref" ] || die "--with $spec: not a directory, and no @REF"
-            path="$work/$dep"
-            if [ -d "$path/.git" ]; then
-                log "using the existing clone of $dep in $path"
-            else
-                log "cloning $dep: $repo @ $ref"
-                git clone --quiet --depth 1 --branch "$ref" "$repo" "$path"
-            fi
-            CI_WITH_CLONED+=("$dep")
-        fi
-        CI_WITH_NAMES+=("$dep")
-        CI_WITH_PATHS+=("$path")
-    done
-}
-
 # ci_as_user <container> <dir> <command>: sh -c <command> in <dir> as the caller,
 # with group www-data added, umask 002 and HOME=/tmp; composer's cache too when
 # CI_COMPOSER_CACHE=yes (the caller mounted it at /tmp/composer-cache).
@@ -312,17 +336,7 @@ ci_activate() {
 - [ ] **Step 5: Switch `plugin-test.sh` onto them**
 
 In `docker/ci/plugin-test.sh`:
-- Replace the block from `run_args=(-v "$CHECKOUT:$FA/modules/$NAME")` through the `done` that ends the `--with` loop with:
-
-```bash
-ci_with_resolve "$WORK" "$NAME" "${WITH[@]+"${WITH[@]}"}"
-run_args=(-v "$CHECKOUT:$FA/modules/$NAME")
-for i in "${!CI_WITH_NAMES[@]}"; do
-    run_args+=(-v "${CI_WITH_PATHS[$i]}:$FA/modules/${CI_WITH_NAMES[$i]}")
-done
-```
-
-- Replace the `exec_env=(-e HOME=/tmp)` block (through its closing `fi`) with:
+- Replace the `exec_env=(-e HOME=/tmp)` block, through its closing `fi`, with:
 
 ```bash
 if [ -n "${COMPOSER_CACHE_DIR:-}" ]; then
@@ -333,66 +347,63 @@ fi
 ```
 
 - Delete the local `as_user()` function. Replace each `as_user "<dir>" "<cmd>"` call with `ci_as_user "$CONTAINER" "<dir>" "<cmd>"`.
-- Replace the loop `for dep in "${cloned[@]+"${cloned[@]}"}"; do` with `for dep in "${CI_WITH_CLONED[@]+"${CI_WITH_CLONED[@]}"}"; do`.
 - Replace the activation block (`if [ "$ACTIVATE" = yes ]; then ... fi`) with:
 
 ```bash
 if [ "$ACTIVATE" = yes ]; then
-    ci_activate "$CONTAINER" "${CI_WITH_NAMES[@]+"${CI_WITH_NAMES[@]}"}" "$NAME"
+    ci_activate "$CONTAINER" "${deps[@]+"${deps[@]}"}" "$NAME"
 fi
 ```
-
-Remove the now-unused `deps` and `cloned` arrays.
 
 - [ ] **Step 6: Run the tests**
 
 Run, one at a time: `docker/ci/build-image.sh cp 7.4 fa-ci:local-cp-7.4 && FA_CI_IMAGE=fa-ci:local-cp-7.4 docker/ci/test/run.sh`
-Expected: every section `0 failed`, `all passed`. driver.sh passing unchanged is the proof that the refactor kept `plugin-test.sh`'s behaviour.
+Expected: every section `0 failed`, `all passed`. driver.sh passing unchanged proves the refactor kept `plugin-test.sh`'s behaviour.
 
-Run: `docker run --rm -v "$PWD":/mnt -w /mnt koalaman/shellcheck:stable -x docker/ci/lib.sh docker/ci/plugin-test.sh docker/ci/image/fa-ci-ext-list docker/ci/image/fa-ci-dataset docker/ci/test/*.sh && php -l docker/ci/image/fa-ci-register`
+Run: `docker run --rm -v "$PWD":/mnt -w /mnt koalaman/shellcheck:stable -x docker/ci/lib.sh docker/ci/plugin-test.sh docker/ci/image/fa-ci-ext-list docker/ci/image/fa-ci-deactivate docker/ci/image/fa-ci-dataset docker/ci/test/*.sh && php -l docker/ci/image/fa-ci-register`
 Expected: clean, `No syntax errors detected`.
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add docker/ci
-git update-index --chmod=+x docker/ci/image/fa-ci-ext-list
-git -c user.name=Cambell -c user.email=cambell.prince@gmail.com commit -m "ci: Shared driver functions; ids and dump files for the helpers
+git update-index --chmod=+x docker/ci/image/fa-ci-ext-list docker/ci/image/fa-ci-deactivate
+git -c user.name=Cambell -c user.email=cambell.prince@gmail.com commit -m "ci: Shared driver functions; ids, dumps and deactivation in the image
 
-lib.sh gains ci_with_resolve, ci_as_user and ci_activate, which
-plugin-test.sh now uses and plugin-dev.sh will. fa-ci-register takes --id
-(a live site's extension id), fa-ci-dataset loads a dump file as it is, and
-fa-ci-ext-list reads the ids out of an installed_extensions.php.
+lib.sh gains ci_as_user and ci_activate, which plugin-test.sh now uses and
+plugin-dev.sh will. fa-ci-register takes --id (a live site's extension id),
+fa-ci-dataset loads a dump file as it is, fa-ci-ext-list reads the ids out of
+an installed_extensions.php, and fa-ci-deactivate uses FA's own form.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 2: `plugin-dev.sh` core: environments that persist
+### Task 2: `plugin-dev.sh`: the modules mount, opt-in modules, persistence
 
 **Files (FA worktree):**
 - Create: `docker/ci/plugin-dev.sh`
+- Create: `docker/ci/dev/example.env`
+- Modify: `.gitignore` (the environments' own configs)
+- Modify: `docker/ci/README.md` (a "Development environments" section)
 - Test: `docker/ci/test/dev.sh`
 - Modify: `docker/ci/test/run.sh` (run dev.sh after driver.sh)
 
 **Interfaces:**
-- Consumes (Task 1): `ci_with_resolve`, `ci_as_user`, `ci_activate`, `ci_boot`, `ci_diagnostics`, `fa_ci_image`, `module_name`, `log`, `die`, and the in-image `fa-ci-dataset` (`test|demo`).
-- Produces:
+- Consumes (Task 1): `ci_as_user`, `ci_activate`, `ci_boot`, `ci_diagnostics`, `fa_ci_image`, `log`, `die`; the in-image `fa-ci-dataset`, `fa-ci-ext-list`, `fa-ci-deactivate` and `fa-ci-wait-ready`.
+- Produces (used by Task 3 and plan 3B):
 
 ```
-plugin-dev.sh [--env NAME] up [options] [<plugin-checkout>]
-    options: --port N --image IMG --fa cp|upstream --php 7.4|8.3 --dataset test|demo
-             --with NAME=REPO@REF|NAME=PATH (repeatable) --theme NAME=PATH (repeatable)
-             --mount HOST:CONTAINER (repeatable) --setup CMD --init CMD --name NAME
-plugin-dev.sh [--env NAME] down | destroy --yes | status | url | shell | exec <cmd> | logs [app|errors]
+docker/ci/plugin-dev.sh [--env NAME] [--config FILE] up | link | activate | down | destroy --yes
+                                                    | status | url | shell | exec [--dir D] <command>
+                                                    | logs [app|errors] | mail [list|show <file>|clear]
+                                                    | db dump [file] | db load <file> | db shell
+settings: FA_DEV_MODULES FA_DEV_MODULES_ROOT FA_DEV_THEMES FA_DEV_THEMES_ROOT FA_DEV_PORT
+          FA_DEV_DATASET FA_DEV_EXTENSIONS FA_DEV_INIT FA_DEV_MOUNTS FA_DEV_IMAGE FA_DEV_FA FA_DEV_PHP
 ```
 
-  Task 3 adds `--dataset <file>`, `--extensions`, `activate`, `db` and `mail`, extending the dispatcher here. Globals Task 3 relies on:
-  - `ENV`, `CONTAINER` (`fa-dev-$ENV`), `VOLUME` (`fa-dev-$ENV-db`), `WORK` (the clone dir), `FA=/var/www/html`;
-  - `label <key>` (reads `fa-dev.<key>` from the container);
-  - `plugin_dir` (prints the plugin's directory in the container, or `$FA`);
-  - `require_env` (dies if the container doesn't exist).
+  `up` prints the URL on stdout as its last line. The applied module list is recorded in the container at `/var/lib/fa-dev/modules`, one name per line.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -401,31 +412,40 @@ plugin-dev.sh [--env NAME] down | destroy --yes | status | url | shell | exec <c
 ```bash
 #!/usr/bin/env bash
 #
-# plugin-dev.sh end to end against the fixture modules: environments that
-# persist, on their own port and volume, and go away completely on destroy.
+# plugin-dev.sh end to end against the fixture modules: the modules folder
+# mounted live, an opt-in list applied with link, environments that persist on
+# their own port and volume, backups, live extension ids, db and mail.
 #
 #   FA_CI_IMAGE=<image> docker/ci/test/dev.sh
 
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source-path=SCRIPTDIR source=../lib.sh
-. "$here/../lib.sh"
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$here/lib.sh"
 : "${FA_CI_IMAGE:?set FA_CI_IMAGE to the image under test}"
-export FA_CI_IMAGE
+export FA_DEV_IMAGE="$FA_CI_IMAGE"
 
 d="$here/../plugin-dev.sh"
-fx="$here/fixtures/modules"
 TMP_A="$(mktemp -d)"
-export XDG_CACHE_HOME="$TMP_A/cache"
-env_a="citest$$a"
-env_b="citest$$b"
+mods="$TMP_A/modules"
+cp -R "$here/fixtures/modules" "$mods"
+# A module with no install SQL, to show where unlisted modules' ids go.
+mkdir -p "$mods/ci_gamma"
+printf '<?php\nclass hooks_ci_gamma extends hooks\n{\n\tvar $module_name = "ci_gamma";\n}\n' > "$mods/ci_gamma/hooks.php"
+# The init convention: ci_alpha's tools/init.sh leaves a row behind.
+mkdir -p "$mods/ci_alpha/tools"
+cat > "$mods/ci_alpha/tools/init.sh" <<'SH'
+#!/bin/sh
+mariadb -h "$FA_DB_HOST" -u "$FA_DB_USER" -p"$FA_DB_PASSWORD" "$FA_DB_NAME" \
+    -e "INSERT INTO 0_ci_alpha (marker) VALUES (CONCAT('init', '-ran'))"
+SH
+export FA_DEV_MODULES_ROOT="$mods"
+
 free_port() { python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'; }
-port_a="$(free_port)"
-port_b="$(free_port)"
+env_a="citest$$a"; env_b="citest$$b"; env_c="citest$$c"; env_e="citest$$e"
+port_a="$(free_port)"; port_c="$(free_port)"; port_e="$(free_port)"
 cleanup() {
-    for e in "$env_a" "$env_b"; do
+    for e in "$env_a" "$env_b" "$env_c" "$env_e"; do
         docker rm -f "fa-dev-$e" >/dev/null 2>&1 || true
         docker volume rm "fa-dev-$e-db" >/dev/null 2>&1 || true
     done
@@ -433,44 +453,113 @@ cleanup() {
 }
 trap cleanup EXIT
 
-sqlq() { "$d" --env "$env_a" exec "mariadb -h localhost -u fa -pfa -N fa_test -e \"$1\""; }
+cfg_a="$TMP_A/a.env"
+# The config's port is wrong on purpose: FA_DEV_PORT in the shell must win.
+printf 'FA_DEV_MODULES="ci_alpha ci_beta"\nFA_DEV_PORT=1\n' > "$cfg_a"
+dev_a() { FA_DEV_PORT="$port_a" "$d" --env "$env_a" --config "$cfg_a" "$@"; }
+state() { "$d" --env "$1" exec 'php -r "include \"/var/www/html/company/0/installed_extensions.php\"; foreach (\$installed_extensions as \$id => \$e) echo \$e[\"package\"], \"@\", \$id, \"=\", \$e[\"active\"] ? \"on\" : \"off\", \" \";"'; }
+sqlq() { "$d" --env "$1" exec "mariadb -h localhost -u fa -pfa -N fa_test -e \"$2\""; }
 
-expect_status 0 "up creates an environment with a module and a dependency" \
-    "$d" --env "$env_a" up --port "$port_a" --with "ci_alpha=$fx/ci_alpha" "$fx/ci_beta"
+expect_status 0 "up creates an environment from the config, the shell winning" dev_a up
 expect_contains "and prints its URL" "http://localhost:$port_a/" "$OUT"
 expect_status 0 "FrontAccounting answers on the port" curl -fsS -o /dev/null "http://localhost:$port_a/index.php"
-expect_status 0 "both modules are active" \
-    "$d" --env "$env_a" exec 'php -r "include \"/var/www/html/company/0/installed_extensions.php\"; foreach (\$installed_extensions as \$e) echo \$e[\"package\"], \"=\", \$e[\"active\"] ? \"on\" : \"off\", \"\n\";"'
-expect_contains "ci_alpha on" "ci_alpha=on" "$OUT"
-expect_contains "ci_beta on" "ci_beta=on" "$OUT"
-expect_status 0 "status says it is running" "$d" --env "$env_a" status
-expect_contains "running" "running" "$OUT"
-expect_status 0 "url prints the URL" "$d" --env "$env_a" url
-expect_contains "the port" "http://localhost:$port_a/" "$OUT"
-expect_status 0 "exec runs as the caller in the plugin directory" "$d" --env "$env_a" exec 'echo "uid=$(id -u) dir=$(pwd)"'
+expect_status 0 "reads the lists" state "$env_a"
+expect_contains "ci_alpha on" "ci_alpha@1=on" "$OUT"
+expect_contains "ci_beta on, after it" "ci_beta@2=on" "$OUT"
+expect_absent "folders not listed are not extensions" "ci_plain" "$OUT"
+expect_status 0 "ci_alpha's tools/init.sh ran" sqlq "$env_a" "SELECT marker FROM 0_ci_alpha"
+expect_contains "its row" "init-ran" "$OUT"
+
+printf '<?php echo "live-" . "edit";\n' > "$mods/ci_alpha/probe.php"
+expect_status 0 "an edit on the host is live" curl -fsS "http://localhost:$port_a/modules/ci_alpha/probe.php"
+expect_contains "served as written" "live-edit" "$OUT"
+expect_status 0 "exec runs as the caller in the FA tree" "$d" --env "$env_a" exec 'echo "uid=$(id -u) dir=$(pwd)"'
 expect_contains "as the caller" "uid=$(id -u)" "$OUT"
-expect_contains "in modules/ci_beta" "dir=/var/www/html/modules/ci_beta" "$OUT"
+expect_contains "in the FA tree" "dir=/var/www/html" "$OUT"
+expect_status 0 "exec --dir runs under it" "$d" --env "$env_a" exec --dir modules/ci_beta pwd
+expect_contains "in modules/ci_beta" "/var/www/html/modules/ci_beta" "$OUT"
 
-expect_status 0 "a row written to the database" sqlq "INSERT INTO 0_ci_alpha (marker) VALUES (CONCAT('kept', '-across-restarts'))"
+id_before="$(docker inspect -f '{{.Id}}' "fa-dev-$env_a")"
+printf 'FA_DEV_MODULES="ci_alpha"\nFA_DEV_PORT=1\n' > "$cfg_a"
+expect_status 0 "link applies a smaller list" dev_a link
+expect_status 0 "reads the lists" state "$env_a"
+expect_contains "ci_beta off" "ci_beta@2=off" "$OUT"
+expect_contains "ci_alpha still on" "ci_alpha@1=on" "$OUT"
+printf 'FA_DEV_MODULES="ci_alpha ci_beta"\nFA_DEV_PORT=1\n' > "$cfg_a"
+expect_status 0 "link applies it again" dev_a link
+expect_status 0 "reads the lists" state "$env_a"
+expect_contains "ci_beta on again" "ci_beta@2=on" "$OUT"
+expect_status 0 "the same container" test "$(docker inspect -f '{{.Id}}' "fa-dev-$env_a")" = "$id_before"
+
+expect_status 0 "a row to keep" sqlq "$env_a" "INSERT INTO 0_ci_alpha (marker) VALUES (CONCAT('kept', '-across-restarts'))"
 expect_status 0 "down stops it" "$d" --env "$env_a" down
-expect_status 0 "up again keeps the data (and ignores a dataset)" "$d" --env "$env_a" up --dataset demo
-expect_contains "saying the options only apply at creation" "only apply when" "$OUT"
-expect_status 0 "the row is still there" sqlq "SELECT marker FROM 0_ci_alpha"
+expect_status 0 "up again keeps the data" env FA_DEV_DATASET=demo FA_DEV_PORT="$port_a" "$d" --env "$env_a" --config "$cfg_a" up
+expect_contains "saying what stays as created" "stay as created" "$OUT"
+expect_status 0 "the row is still there" sqlq "$env_a" "SELECT marker FROM 0_ci_alpha"
 expect_contains "kept" "kept-across-restarts" "$OUT"
+expect_status 0 "status" "$d" --env "$env_a" status
+expect_contains "running" "running" "$OUT"
+expect_status 0 "url" "$d" --env "$env_a" url
+expect_contains "the port" "http://localhost:$port_a/" "$OUT"
 
-expect_status 1 "a busy port is reported" "$d" --env "$env_b" up --port "$port_a" "$fx/ci_alpha"
+expect_status 1 "a busy port is reported" env FA_DEV_MODULES=ci_alpha FA_DEV_PORT="$port_a" "$d" --env "$env_b" up
 expect_contains "naming the port" "port $port_a" "$OUT"
-docker rm -f "fa-dev-$env_b" >/dev/null 2>&1 || true
-docker volume rm "fa-dev-$env_b-db" >/dev/null 2>&1 || true
+expect_status 0 "and nothing was created" sh -c "! docker inspect fa-dev-$env_b >/dev/null 2>&1"
+expect_status 1 "a listed folder without hooks.php is refused" env FA_DEV_MODULES=ci_plain FA_DEV_PORT="$(free_port)" "$d" --env "$env_b" up
+expect_contains "naming it" "ci_plain" "$OUT"
 
-expect_status 0 "a second environment on its own port" "$d" --env "$env_b" up --port "$port_b" "$fx/ci_alpha"
+cat > "$TMP_A/live-extensions.php" <<'PHP'
+<?php
+$next_extension_id = 12;
+$installed_extensions = array (
+  7 => array ('package' => 'ci_beta', 'name' => 'ci_beta', 'version' => '-', 'available' => '', 'type' => 'extension', 'path' => 'modules/ci_beta', 'active' => true),
+  5 => array ('package' => 'ci_alpha', 'name' => 'ci_alpha', 'version' => '-', 'available' => '', 'type' => 'extension', 'path' => 'modules/ci_alpha', 'active' => true),
+  9 => array ('package' => 'not_here', 'name' => 'not_here', 'version' => '-', 'available' => '', 'type' => 'extension', 'path' => 'modules/not_here', 'active' => true),
+);
+PHP
+dev_c() { FA_DEV_MODULES="ci_alpha ci_beta ci_gamma" FA_DEV_PORT="$port_c" FA_DEV_EXTENSIONS="$TMP_A/live-extensions.php" "$d" --env "$env_c" "$@"; }
+expect_status 0 "a live site's extension ids, in the list's own order (ci_beta needs ci_alpha first)" dev_c up
+expect_status 0 "reads the lists" state "$env_c"
+expect_contains "ci_alpha keeps 5" "ci_alpha@5=on" "$OUT"
+expect_contains "ci_beta keeps 7" "ci_beta@7=on" "$OUT"
+expect_contains "an unlisted module comes after the file's ids" "ci_gamma@12=on" "$OUT"
+
+expect_status 0 "a row to find in the dump" sqlq "$env_c" "INSERT INTO 0_ci_alpha (marker) VALUES (CONCAT('in', '-the-dump'))"
+expect_status 0 "without ci_alpha's table, as a site before the module" sqlq "$env_c" "RENAME TABLE 0_ci_alpha TO 0_ci_alpha_aside"
+expect_status 0 "db dump writes a gzipped file" "$d" --env "$env_c" db dump "$TMP_A/dump.sql.gz"
+expect_status 0 "that is a real dump" sh -c "gunzip -c '$TMP_A/dump.sql.gz' | grep -q 'in-the-dump'"
+expect_status 0 "db load" dev_c db load "$TMP_A/dump.sql.gz"
+expect_status 0 "db load re-runs the modules' install SQL" sqlq "$env_c" "SELECT marker FROM 0_ci_alpha"
+expect_contains "ci_alpha's table is back" "alpha-installed" "$OUT"
+expect_contains "and its init ran again" "init-ran" "$OUT"
+expect_status 0 "reads the lists" state "$env_c"
+expect_contains "still at 5" "ci_alpha@5=on" "$OUT"
+
+expect_status 0 "a mail is caught" "$d" --env "$env_c" exec 'php -r "mail(\"a@example.com\", \"dev mail \" . \"subject\", \"body\");"'
+expect_status 0 "mail list shows it" "$d" --env "$env_c" mail list
+expect_contains "an .eml" ".eml" "$OUT"
+eml="$(printf '%s\n' "$OUT" | grep '\.eml$' | head -n 1)"
+expect_status 0 "mail show prints it" "$d" --env "$env_c" mail show "$eml"
+expect_contains "the subject" "dev mail subject" "$OUT"
+expect_status 0 "mail clear" "$d" --env "$env_c" mail clear
+expect_status 0 "leaves none" "$d" --env "$env_c" mail list
+expect_contains "none" "(no mail)" "$OUT"
+
+expect_status 0 "a backup as the dataset" env FA_DEV_MODULES=ci_alpha FA_DEV_PORT="$port_e" FA_DEV_DATASET="$TMP_A/dump.sql.gz" "$d" --env "$env_e" up
+expect_status 0 "with the backup's data" sqlq "$env_e" "SELECT marker FROM 0_ci_alpha_aside"
+expect_contains "the dumped row" "in-the-dump" "$OUT"
+expect_status 0 "destroy it" "$d" --env "$env_e" destroy --yes
+expect_status 2 "a missing backup is refused before anything starts" env FA_DEV_MODULES=ci_alpha FA_DEV_PORT="$port_e" FA_DEV_DATASET="$TMP_A/nope.sql" "$d" --env "$env_e" up
+expect_status 0 "and nothing was created" sh -c "! docker inspect fa-dev-$env_e >/dev/null 2>&1"
+
 expect_status 1 "destroy wants --yes" "$d" --env "$env_a" destroy
 expect_contains "saying so" "--yes" "$OUT"
 expect_status 0 "destroy --yes" "$d" --env "$env_a" destroy --yes
 expect_status 0 "destroy removes only this environment" sh -c \
-    "! docker inspect fa-dev-$env_a >/dev/null 2>&1 && ! docker volume inspect fa-dev-$env_a-db >/dev/null 2>&1 && docker inspect fa-dev-$env_b >/dev/null 2>&1 && test ! -e '$XDG_CACHE_HOME/fa-ci/dev/$env_a'"
-expect_status 1 "an unknown command is refused" "$d" --env "$env_b" frobnicate
-expect_status 0 "destroy the second" "$d" --env "$env_b" destroy --yes
+    "! docker inspect fa-dev-$env_a >/dev/null 2>&1 && ! docker volume inspect fa-dev-$env_a-db >/dev/null 2>&1 && docker inspect fa-dev-$env_c >/dev/null 2>&1"
+expect_status 0 "the modules folder on the host is untouched" test -f "$mods/ci_alpha/hooks.php"
+expect_status 1 "an unknown command is refused" "$d" --env "$env_c" frobnicate
+expect_status 0 "destroy the other" "$d" --env "$env_c" destroy --yes
 finish
 ```
 
@@ -490,132 +579,236 @@ Expected: FAIL from the first case (`plugin-dev.sh: No such file or directory`).
 #
 # Persistent FrontAccounting development environments, from the CI image.
 #
-#   docker/ci/plugin-dev.sh [--env NAME] up [options] [<plugin-checkout>]
-#   docker/ci/plugin-dev.sh [--env NAME] down | destroy --yes | status | url
-#   docker/ci/plugin-dev.sh [--env NAME] shell | exec <command> | logs [app|errors]
+#   docker/ci/plugin-dev.sh [--env NAME] [--config FILE] <command>
 #
-# An environment is a container, fa-dev-<env>, with its database on the volume
-# fa-dev-<env>-db and Apache on 127.0.0.1:<port>. `up` creates it, or starts
-# it again: options only apply when it is created (destroy to change them).
-# <env> defaults to the module name of the plugin checkout (or of the current
-# directory), else "fa".
+# Commands:
+#   up                    create the environment, or start it again and link
+#   link                  apply FA_DEV_MODULES: activate what it lists,
+#                         deactivate what it no longer lists
+#   activate              activate every listed module again, from scratch
+#   down                  stop it; its data stays
+#   destroy --yes         remove the container and its database volume
+#   status | url
+#   shell                 bash in the FrontAccounting tree, as you
+#   exec [--dir D] <cmd>  a command in the FrontAccounting tree (or D under it)
+#   logs [app|errors]
+#   mail [list|show <file>|clear]
+#   db dump [file] | db load <file> | db shell
 #
-# up options:
-#   --port N               Apache's port on this machine (default 8100)
-#   --image IMG | --fa cp|upstream --php 7.4|8.3   as plugin-test.sh
-#   --dataset test|demo    the database it starts from (default: test)
-#   --with NAME=REPO@REF   another module, cloned into the environment's cache
-#   --with NAME=PATH       ... or a local checkout, mounted live
-#   --theme NAME=PATH      a theme checkout, mounted at themes/NAME
-#   --mount HOST:CONTAINER another bind mount
-#   --setup CMD            run in the plugin directory before activation
-#   --init CMD             run in the plugin directory after activation
-#   --name NAME            the module name, for a checkout without hooks.php
+# The modules/ folder of a FrontAccounting checkout (FA_DEV_MODULES_ROOT,
+# default: the modules/ of the checkout this script is in) is mounted at
+# /var/www/html/modules, so an edit on this machine is live on the next
+# request. Which of its folders are extensions is opt-in: FA_DEV_MODULES,
+# activated in that order.
 #
-# Commands run as your uid:gid, with group www-data added. Sign in as
-# test/test (and admin/password on the demo dataset).
+# Settings come from the environment's config file, docker/ci/dev/<env>.env
+# (see example.env there; --config to name another), and FA_DEV_* variables
+# already set in your shell win over it:
+#
+#   FA_DEV_MODULES        folders of modules/ to activate, in order
+#   FA_DEV_MODULES_ROOT   the folder mounted as modules/
+#   FA_DEV_THEMES         folders of FA_DEV_THEMES_ROOT to mount under themes/
+#   FA_DEV_THEMES_ROOT    default: the themes/ of this checkout
+#   FA_DEV_PORT           Apache's port on this machine (default 8100)
+#   FA_DEV_DATASET        test, demo, or a .sql/.sql.gz backup (default test)
+#   FA_DEV_EXTENSIONS     an installed_extensions.php (a live site's) whose
+#                         extension ids the modules keep
+#   FA_DEV_INIT           yes (default): run each activated module's own
+#                         tools/init.sh after activation; no to skip
+#   FA_DEV_MOUNTS         more HOST:CONTAINER mounts, space separated, e.g. a
+#                         plugin checked out elsewhere over modules/NAME
+#   FA_DEV_IMAGE          the image (default: FA_DEV_FA cp, FA_DEV_PHP 7.4)
+#
+# The environment is the container fa-dev-<env> (default env: dev), with its
+# database on the volume fa-dev-<env>-db. The mounts, themes, port, image and
+# dataset take effect when it is created; the module list on up and link.
 
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source-path=SCRIPTDIR source=lib.sh
 . "$here/lib.sh"
-
+checkout="$(cd "$here/../.." && pwd)"
 FA=/var/www/html
-ENV=''
-if [ "${1:-}" = --env ]; then ENV="$2"; shift 2; fi
-[ "$#" -ge 1 ] || die "usage: plugin-dev.sh [--env NAME] up|down|destroy|status|url|shell|exec|logs ..."
+
+ENV_NAME=dev
+CONFIG=''
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --env) ENV_NAME="$2"; shift 2 ;;
+        --config) CONFIG="$2"; shift 2 ;;
+        *) break ;;
+    esac
+done
+case "$ENV_NAME" in ''|*[!A-Za-z0-9_.-]*) die "--env takes letters, digits, '.', '_' and '-'" ;; esac
+[ -n "$CONFIG" ] || CONFIG="$here/dev/$ENV_NAME.env"
+[ "$#" -ge 1 ] || die "usage: plugin-dev.sh [--env NAME] [--config FILE] up|link|activate|down|destroy|status|url|shell|exec|logs|mail|db ..."
 CMD="$1"
 shift
+CONTAINER="fa-dev-$ENV_NAME"
+VOLUME="fa-dev-$ENV_NAME-db"
 
-usage_up() { die "usage: plugin-dev.sh [--env NAME] up [--port N] [--image IMG|--fa F --php V] [--dataset D] [--with NAME=SRC]... [--theme NAME=PATH]... [--mount H:C]... [--setup CMD] [--init CMD] [--name NAME] [<plugin-checkout>]"; }
-
-# The environment's name, and everything named after it.
-set_env() {
-    [ -n "$ENV" ] || ENV="$(module_name "${1:-$PWD}" || echo fa)"
-    case "$ENV" in ''|*[!A-Za-z0-9_.-]*) die "--env takes letters, digits, '.', '_' and '-'" ;; esac
-    CONTAINER="fa-dev-$ENV"
-    VOLUME="fa-dev-$ENV-db"
-    WORK="${XDG_CACHE_HOME:-$HOME/.cache}/fa-ci/dev/$ENV"
+# The config file, then the FA_DEV_* already in the environment on top.
+load_config() {
+    local saved line
+    saved="$(env | grep '^FA_DEV_' || true)"
+    if [ -f "$CONFIG" ]; then
+        set -a
+        # shellcheck disable=SC1090 # the environment's own config
+        . "$CONFIG"
+        set +a
+    fi
+    while IFS= read -r line; do [ -z "$line" ] || export "${line?}"; done <<< "$saved"
+    FA_DEV_MODULES="${FA_DEV_MODULES:-}"
+    FA_DEV_MODULES_ROOT="${FA_DEV_MODULES_ROOT:-$checkout/modules}"
+    FA_DEV_THEMES="${FA_DEV_THEMES:-}"
+    FA_DEV_THEMES_ROOT="${FA_DEV_THEMES_ROOT:-$checkout/themes}"
+    FA_DEV_PORT="${FA_DEV_PORT:-8100}"
+    FA_DEV_DATASET="${FA_DEV_DATASET:-test}"
+    FA_DEV_EXTENSIONS="${FA_DEV_EXTENSIONS:-}"
+    FA_DEV_INIT="${FA_DEV_INIT:-yes}"
+    FA_DEV_MOUNTS="${FA_DEV_MOUNTS:-}"
+    FA_DEV_IMAGE="${FA_DEV_IMAGE:-$(fa_ci_image "${FA_DEV_FA:-cp}" "${FA_DEV_PHP:-7.4}")}"
 }
 
 exists() { docker inspect "$CONTAINER" >/dev/null 2>&1; }
 running() { [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER" 2>/dev/null)" = true ]; }
-require_env() { exists || die "no environment '$ENV' ($CONTAINER); create it with: plugin-dev.sh --env $ENV up ..."; }
+require_env() { exists || die "no environment '$ENV_NAME' ($CONTAINER); create it with: plugin-dev.sh --env $ENV_NAME up"; }
 label() { docker inspect -f "{{index .Config.Labels \"fa-dev.$1\"}}" "$CONTAINER"; }
-plugin_dir() { local p; p="$(label plugin)"; if [ -n "$p" ]; then echo "$FA/modules/$p"; else echo "$FA"; fi; }
 url() { echo "http://localhost:$(label port)/"; }
+applied() { docker exec "$CONTAINER" cat /var/lib/fa-dev/modules 2>/dev/null || true; }
+save_applied() {
+    docker exec "$CONTAINER" sh -c 'mkdir -p /var/lib/fa-dev && : > /var/lib/fa-dev/modules && for m in "$@"; do echo "$m" >> /var/lib/fa-dev/modules; done' sh "$@"
+}
+
+# Where a listed module comes from on this machine: a FA_DEV_MOUNTS entry over
+# modules/<name>, else the modules folder.
+module_source() {
+    local spec
+    for spec in $FA_DEV_MOUNTS; do
+        [ "${spec#*:}" != "$FA/modules/$1" ] || { echo "${spec%%:*}"; return; }
+    done
+    echo "$FA_DEV_MODULES_ROOT/$1"
+}
+
+# The modules to activate, as name or name:id, in FA_DEV_MODULES' order: ids
+# from FA_DEV_EXTENSIONS where it lists the module.
+module_specs() {
+    local m id listed=''
+    if [ -n "$FA_DEV_EXTENSIONS" ]; then
+        docker cp "$FA_DEV_EXTENSIONS" "$CONTAINER:/tmp/fa-dev-extensions.php"
+        listed="$(docker exec "$CONTAINER" fa-ci-ext-list /tmp/fa-dev-extensions.php)"
+    fi
+    for m in $FA_DEV_MODULES; do
+        id="$(printf '%s\n' "$listed" | awk -v m="$m" '$2 == m {print $1; exit}')"
+        if [ -n "$id" ]; then echo "$m:$id"; else echo "$m"; fi
+    done
+}
+
+# FrontAccounting runs a module's install SQL only as it becomes active, so a
+# re-activation (after the database changed) starts from inactive.
+mark_inactive() {
+    [ "$#" -gt 0 ] || return 0
+    docker exec -u www-data "$CONTAINER" php -r '
+        $f = "/var/www/html/company/0/installed_extensions.php";
+        $installed_extensions = array();
+        include $f;
+        $names = array_slice($argv, 1);
+        foreach ($installed_extensions as $k => $e)
+            if (in_array($e["package"], $names, true)) $installed_extensions[$k]["active"] = false;
+        file_put_contents($f, "<?php\n\n\$installed_extensions = " . var_export($installed_extensions, true) . ";\n");' "$@"
+}
+
+# Each module's own tools/init.sh, in its directory, unless FA_DEV_INIT=no.
+run_inits() {
+    [ "$FA_DEV_INIT" = yes ] || return 0
+    local m
+    for m in "$@"; do
+        if docker exec "$CONTAINER" test -f "$FA/modules/$m/tools/init.sh"; then
+            log "init: $m (tools/init.sh)"
+            ci_as_user "$CONTAINER" "$FA/modules/$m" 'sh tools/init.sh'
+        fi
+    done
+}
+
+# Every listed module, activated from inactive, then their inits.
+activate_all() {
+    local specs=() names=() s
+    while IFS= read -r s; do [ -z "$s" ] || specs+=("$s"); done < <(module_specs)
+    for s in "${specs[@]+"${specs[@]}"}"; do names+=("${s%%:*}"); done
+    if [ "${#specs[@]}" -gt 0 ]; then
+        mark_inactive "${names[@]}"
+        ci_activate "$CONTAINER" "${specs[@]}"
+    fi
+    save_applied "${names[@]+"${names[@]}"}"
+    run_inits "${names[@]+"${names[@]}"}"
+}
+
+# The listed modules brought in line with FA_DEV_MODULES: those no longer
+# listed deactivated, new ones activated (and their inits run).
+cmd_link() {
+    local specs=() names=() new=() was s m
+    while IFS= read -r s; do [ -z "$s" ] || specs+=("$s"); done < <(module_specs)
+    for s in "${specs[@]+"${specs[@]}"}"; do names+=("${s%%:*}"); done
+    was=" $(applied | tr '\n' ' ') "
+    for m in $was; do
+        case " ${names[*]-} " in *" $m "*) ;; *) log "deactivating $m"; docker exec "$CONTAINER" fa-ci-deactivate "$m" ;; esac
+    done
+    for m in "${names[@]+"${names[@]}"}"; do
+        case "$was" in *" $m "*) ;; *) new+=("$m") ;; esac
+    done
+    [ "${#specs[@]}" -eq 0 ] || ci_activate "$CONTAINER" "${specs[@]}"
+    save_applied "${names[@]+"${names[@]}"}"
+    run_inits "${new[@]+"${new[@]}"}"
+}
 
 report() {
-    log "$ENV is up: $(url)"
-    printf '  sign in as test/test%s\n' "$([ "$(label dataset)" = demo ] && echo ' or admin/password')" >&2
-    printf '  modules: %s\n' "$(label modules)" >&2
+    log "$ENV_NAME is up: $(url)"
+    printf '  sign in as test/test, or as the dataset'"'"'s own users (admin/password on demo)\n' >&2
+    printf '  modules: %s\n' "$(applied | tr '\n' ' ')" >&2
     url
 }
 
 cmd_up() {
-    local port=8100 image="${FA_CI_IMAGE:-}" flavour=cp php=7.4 dataset=test setup='' init='' name='' checkout=''
-    local with=() themes=() mounts=() given=no
-    while [ "$#" -gt 0 ]; do
-        case "$1" in
-            --port) port="$2"; given=yes; shift 2 ;;
-            --image) image="$2"; given=yes; shift 2 ;;
-            --fa) flavour="$2"; given=yes; shift 2 ;;
-            --php) php="$2"; given=yes; shift 2 ;;
-            --dataset) dataset="$2"; given=yes; shift 2 ;;
-            --with) with+=("$2"); given=yes; shift 2 ;;
-            --theme) themes+=("$2"); given=yes; shift 2 ;;
-            --mount) mounts+=("$2"); given=yes; shift 2 ;;
-            --setup) setup="$2"; given=yes; shift 2 ;;
-            --init) init="$2"; given=yes; shift 2 ;;
-            --name) name="$2"; given=yes; shift 2 ;;
-            -*) usage_up ;;
-            *) [ -z "$checkout" ] || usage_up; [ -d "$1" ] || die "$1 is not a directory"; checkout="$(cd "$1" && pwd)"; given=yes; shift ;;
-        esac
-    done
-    set_env "${checkout:-}"
-
+    load_config
     if exists; then
-        [ "$given" = no ] || log "$CONTAINER exists: options only apply when it is created (destroy --yes to recreate)"
         running || { log "starting $CONTAINER"; docker start "$CONTAINER" >/dev/null; }
-        docker exec "$CONTAINER" fa-ci-wait-ready 120 || { ci_diagnostics "$CONTAINER"; die "$CONTAINER did not become ready"; }
+        if ! docker exec "$CONTAINER" fa-ci-wait-ready 120; then
+            ci_diagnostics "$CONTAINER"
+            die "$CONTAINER did not become ready"
+        fi
+        log "$CONTAINER exists: its mounts, themes, port, image and dataset stay as created (destroy --yes to change them); applying FA_DEV_MODULES"
+        cmd_link
         report
         return
     fi
 
-    case "$port" in ''|*[!0-9]*) die "--port takes a number" ;; esac
-    case "$dataset" in test|demo) ;; *) die "--dataset is test or demo, not '$dataset'" ;; esac
-    if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$port\$"; then
-        die "port $port is already in use on this machine; pick another with --port"
-    fi
-    [ -n "$image" ] || image="$(fa_ci_image "$flavour" "$php")"
-    if [ -n "$checkout" ] && [ -z "$name" ]; then
-        name="$(module_name "$checkout")" || die "$checkout has no hooks.php declaring class hooks_<name>; pass --name"
+    case "$FA_DEV_PORT" in ''|*[!0-9]*) die "FA_DEV_PORT takes a number, not '$FA_DEV_PORT'" ;; esac
+    local dataset_file=''
+    case "$FA_DEV_DATASET" in
+        test|demo) ;;
+        *)
+            [ -f "$FA_DEV_DATASET" ] || { printf 'plugin-dev.sh: no such dataset file: %s\n' "$FA_DEV_DATASET" >&2; exit 2; }
+            dataset_file="$(cd "$(dirname "$FA_DEV_DATASET")" && pwd)/$(basename "$FA_DEV_DATASET")" ;;
+    esac
+    [ -z "$FA_DEV_EXTENSIONS" ] || [ -f "$FA_DEV_EXTENSIONS" ] \
+        || { printf 'plugin-dev.sh: no such file: %s\n' "$FA_DEV_EXTENSIONS" >&2; exit 2; }
+    [ -d "$FA_DEV_MODULES_ROOT" ] || die "FA_DEV_MODULES_ROOT is not a directory: $FA_DEV_MODULES_ROOT"
+    local m t
+    for m in $FA_DEV_MODULES; do
+        [ -f "$(module_source "$m")/hooks.php" ] || die "FA_DEV_MODULES lists $m, but $(module_source "$m") has no hooks.php"
+    done
+    for t in $FA_DEV_THEMES; do
+        [ -d "$FA_DEV_THEMES_ROOT/$t" ] || die "FA_DEV_THEMES lists $t, but $FA_DEV_THEMES_ROOT/$t is not a directory"
+    done
+    if ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$FA_DEV_PORT\$"; then
+        die "port $FA_DEV_PORT is already in use on this machine; set FA_DEV_PORT to another"
     fi
 
-    mkdir -p "$WORK"
-    ci_with_resolve "$WORK" "${name:-}" "${with[@]+"${with[@]}"}"
-    local run_args=(-p "127.0.0.1:$port:80" -v "$VOLUME:/var/lib/mysql")
-    [ -z "$checkout" ] || run_args+=(-v "$checkout:$FA/modules/$name")
-    local i spec tname tpath
-    for i in "${!CI_WITH_NAMES[@]}"; do
-        run_args+=(-v "${CI_WITH_PATHS[$i]}:$FA/modules/${CI_WITH_NAMES[$i]}")
-    done
-    for spec in "${themes[@]+"${themes[@]}"}"; do
-        tname="${spec%%=*}"
-        tpath="${spec#*=}"
-        [ -n "$tname" ] && [ "$tname" != "$spec" ] && [ -d "$tpath" ] || die "--theme takes NAME=PATH to a theme checkout, not '$spec'"
-        run_args+=(-v "$(cd "$tpath" && pwd):$FA/themes/$tname")
-    done
-    for spec in "${mounts[@]+"${mounts[@]}"}"; do run_args+=(-v "$spec"); done
-    if [ -n "${COMPOSER_CACHE_DIR:-}" ]; then
-        mkdir -p "$COMPOSER_CACHE_DIR"
-        run_args+=(-v "$COMPOSER_CACHE_DIR:/tmp/composer-cache")
-        CI_COMPOSER_CACHE=yes
-    fi
-    local modules=("${CI_WITH_NAMES[@]+"${CI_WITH_NAMES[@]}"}")
-    [ -z "$name" ] || modules+=("$name")
-    run_args+=(--label "fa-dev.port=$port" --label "fa-dev.plugin=$name" --label "fa-dev.dataset=$dataset"
-               --label "fa-dev.modules=${modules[*]-}" --label "fa-dev.init=$init")
+    local run_args=(-p "127.0.0.1:$FA_DEV_PORT:80" -v "$VOLUME:/var/lib/mysql"
+                    -v "$(cd "$FA_DEV_MODULES_ROOT" && pwd):$FA/modules"
+                    --label "fa-dev.port=$FA_DEV_PORT" --label "fa-dev.dataset=$FA_DEV_DATASET")
+    for t in $FA_DEV_THEMES; do run_args+=(-v "$(cd "$FA_DEV_THEMES_ROOT/$t" && pwd):$FA/themes/$t"); done
+    for m in $FA_DEV_MOUNTS; do run_args+=(-v "$m"); done
 
     local fresh=yes
     if docker volume inspect "$VOLUME" >/dev/null 2>&1; then
@@ -624,294 +817,65 @@ cmd_up() {
     fi
 
     # From here on a failure keeps the environment for inspection.
-    trap 'rc=$?; [ "$rc" -eq 0 ] || { [ "${CI_DIAGNOSED:-}" = yes ] || ci_diagnostics "$CONTAINER"; log "$CONTAINER kept for inspection: plugin-dev.sh --env $ENV shell | logs | destroy --yes"; }' EXIT
-    ci_boot "$CONTAINER" "$image" "${run_args[@]}"
-    if [ "$fresh" = yes ] && [ "$dataset" != test ]; then
-        log "dataset: $dataset"
-        docker exec "$CONTAINER" fa-ci-dataset "$dataset"
+    trap 'rc=$?; if [ "$rc" -ne 0 ]; then [ "${CI_DIAGNOSED:-}" = yes ] || ci_diagnostics "$CONTAINER"; log "$CONTAINER kept for inspection: plugin-dev.sh --env $ENV_NAME logs | shell | activate | destroy --yes"; fi' EXIT
+    ci_boot "$CONTAINER" "$FA_DEV_IMAGE" "${run_args[@]}"
+    if [ "$fresh" = yes ] && [ -n "$dataset_file" ]; then
+        log "dataset: $dataset_file"
+        docker cp "$dataset_file" "$CONTAINER:/tmp/fa-dev-dataset.${dataset_file##*.}"
+        docker exec "$CONTAINER" fa-ci-dataset "/tmp/fa-dev-dataset.${dataset_file##*.}"
+    elif [ "$fresh" = yes ] && [ "$FA_DEV_DATASET" != test ]; then
+        log "dataset: $FA_DEV_DATASET"
+        docker exec "$CONTAINER" fa-ci-dataset "$FA_DEV_DATASET"
     fi
-    local dep
-    for dep in "${CI_WITH_CLONED[@]+"${CI_WITH_CLONED[@]}"}"; do
-        log "composer install --no-dev: $dep"
-        ci_as_user "$CONTAINER" "$FA/modules/$dep" '[ ! -f composer.json ] || composer install --no-dev --no-interaction --no-progress'
-    done
-    if [ -n "$setup" ]; then
-        log "setup: $setup"
-        ci_as_user "$CONTAINER" "$(plugin_dir)" "$setup"
+    if [ -n "$FA_DEV_EXTENSIONS" ]; then
+        # Modules the site's list doesn't have get ids after every id it has used.
+        docker cp "$FA_DEV_EXTENSIONS" "$CONTAINER:/tmp/fa-dev-extensions.php"
+        docker exec -u www-data "$CONTAINER" php -r '
+            $next_extension_id = 1; $installed_extensions = array();
+            include "/tmp/fa-dev-extensions.php";
+            $n = max((int) $next_extension_id, count($installed_extensions) ? max(array_keys($installed_extensions)) + 1 : 1);
+            $f = "/var/www/html/installed_extensions.php";
+            file_put_contents($f, preg_replace("/next_extension_id = \\d+/", "next_extension_id = $n", file_get_contents($f)));'
     fi
-    [ "${#modules[@]}" -eq 0 ] || ci_activate "$CONTAINER" "${modules[@]}"
-    if [ -n "$init" ]; then
-        log "init: $init"
-        ci_as_user "$CONTAINER" "$(plugin_dir)" "$init"
-    fi
+    activate_all
     trap - EXIT
     report
 }
 
 main() {
     case "$CMD" in
-        up) cmd_up "$@" ;;
-        down) set_env; require_env; docker stop "$CONTAINER" >/dev/null; log "$CONTAINER stopped; its data stays" ;;
+        up) cmd_up ;;
+        link) load_config; require_env; cmd_link ;;
+        activate) load_config; require_env; activate_all ;;
+        down) require_env; docker stop "$CONTAINER" >/dev/null; log "$CONTAINER stopped; its data stays" ;;
         destroy)
-            set_env
-            [ "${1:-}" = --yes ] || die "destroy removes $CONTAINER, its database ($VOLUME) and $WORK; run it with --yes"
+            [ "${1:-}" = --yes ] || die "destroy removes $CONTAINER and its database ($VOLUME); run it with --yes"
             docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
             docker volume rm "$VOLUME" >/dev/null 2>&1 || true
-            rm -rf "$WORK"
-            log "$ENV destroyed" ;;
+            log "$ENV_NAME destroyed (the modules folder on this machine is untouched)" ;;
         status)
-            set_env; require_env
-            printf '%s: %s at %s\nmodules: %s\n' "$ENV" "$(running && echo running || echo stopped)" "$(url)" "$(label modules)" ;;
-        url) set_env; require_env; url ;;
+            require_env
+            printf '%s: %s at %s\nmodules: %s\n' "$ENV_NAME" "$(running && echo running || echo stopped)" "$(url)" "$(applied | tr '\n' ' ')" ;;
+        url) require_env; url ;;
         shell)
-            set_env; require_env
-            docker exec -it -w "$(plugin_dir)" -e HOME=/tmp "$CONTAINER" \
+            require_env
+            docker exec -it -w "$FA" -e HOME=/tmp "$CONTAINER" \
                 setpriv --reuid="$(id -u)" --regid="$(id -g)" --groups=33 bash ;;
         exec)
-            set_env; require_env
-            [ "$#" -ge 1 ] || die "usage: plugin-dev.sh [--env NAME] exec <command>"
-            ci_as_user "$CONTAINER" "$(plugin_dir)" "$*" ;;
+            require_env
+            local dir="$FA"
+            if [ "${1:-}" = --dir ]; then dir="$FA/${2#/}"; shift 2; fi
+            [ "$#" -ge 1 ] || die "usage: plugin-dev.sh [--env NAME] exec [--dir D] <command>"
+            ci_as_user "$CONTAINER" "$dir" "$*" ;;
         logs)
-            set_env; require_env
+            require_env
             case "${1:-errors}" in
                 errors) docker exec "$CONTAINER" sh -c 'tail -n 100 /var/www/html/tmp/errors.log 2>/dev/null || echo "(no errors logged)"' ;;
                 app) docker exec "$CONTAINER" sh -c 'tail -n 100 /var/log/apache2/error.log' ;;
                 *) die "usage: plugin-dev.sh [--env NAME] logs [app|errors]" ;;
             esac ;;
-        *) printf 'plugin-dev.sh: unknown command %s\n' "$CMD" >&2; exit 1 ;;
-    esac
-}
-main "$@"
-```
-
-Run: `chmod +x docker/ci/plugin-dev.sh`.
-
-- [ ] **Step 4: Run the test**
-
-Run: `FA_CI_IMAGE=fa-ci:local-cp-7.4 docker/ci/test/dev.sh`
-Expected: `0 failed`. If "a busy port is reported" fails because `ss` isn't on the host, keep the check and fall back to docker's own error. Detect `port is already allocated` in `docker run`'s output inside `ci_boot`'s failure path, and die with the same "port N is already in use" message. Say so in the report.
-
-- [ ] **Step 5: Lint**
-
-Run: `docker run --rm -v "$PWD":/mnt -w /mnt koalaman/shellcheck:stable -x docker/ci/plugin-dev.sh docker/ci/test/dev.sh docker/ci/test/run.sh`
-Expected: clean. Targeted disables are fine where a single-quoted string is deliberately passed into the container.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add docker/ci/plugin-dev.sh docker/ci/test/dev.sh docker/ci/test/run.sh
-git update-index --chmod=+x docker/ci/plugin-dev.sh docker/ci/test/dev.sh
-git -c user.name=Cambell -c user.email=cambell.prince@gmail.com commit -m "ci: plugin-dev.sh, persistent development environments
-
-A named container with its database on a volume and Apache on a fixed port,
-built from the CI image with the same --with/--setup as plugin-test.sh plus
-themes and an --init step. up starts an existing environment again; destroy
---yes removes it, its volume and its clones.
-
-Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
-```
-
----
-
-### Task 3: `plugin-dev.sh` data: backups, live extension ids, db, mail
-
-**Files (FA worktree):**
-- Modify: `docker/ci/plugin-dev.sh`
-- Modify: `docker/ci/README.md` (a "Development environments" section)
-- Test: `docker/ci/test/dev.sh` (appended cases)
-
-**Interfaces:**
-- Consumes (Task 2): `cmd_up`, `set_env`, `require_env`, `label`, `plugin_dir`, `ENV`, `CONTAINER`, `VOLUME`, `WORK`, `FA`. (Task 1): `ci_activate`, `ci_as_user`, and the in-image `fa-ci-dataset <path>` and `fa-ci-ext-list`.
-- Produces:
-  - `up --dataset <host path>`;
-  - `up --extensions <installed_extensions.php>`;
-  - `activate`;
-  - `db dump [file]`, `db load <file>`, `db shell`;
-  - `mail list|show <file>|clear`.
-
-- [ ] **Step 1: Write the failing tests**
-
-Append to `docker/ci/test/dev.sh`, before `finish`:
-
-```bash
-env_c="citest$$c"
-port_c="$(free_port)"
-cat > "$TMP_A/live-extensions.php" <<'PHP'
-<?php
-$next_extension_id = 12;
-$installed_extensions = array (
-  7 => array ('package' => 'ci_beta', 'name' => 'ci_beta', 'version' => '-', 'available' => '', 'type' => 'extension', 'path' => 'modules/ci_beta', 'active' => true),
-  5 => array ('package' => 'ci_alpha', 'name' => 'ci_alpha', 'version' => '-', 'available' => '', 'type' => 'extension', 'path' => 'modules/ci_alpha', 'active' => true),
-  9 => array ('package' => 'not_here', 'name' => 'not_here', 'version' => '-', 'available' => '', 'type' => 'extension', 'path' => 'modules/not_here', 'active' => true),
-);
-PHP
-cleanup_c() { docker rm -f "fa-dev-$env_c" >/dev/null 2>&1 || true; docker volume rm "fa-dev-$env_c-db" >/dev/null 2>&1 || true; }
-trap 'cleanup_c; cleanup' EXIT
-
-expect_status 0 "--extensions registers modules under a live site's ids" \
-    "$d" --env "$env_c" up --port "$port_c" --extensions "$TMP_A/live-extensions.php" \
-    --with "ci_alpha=$fx/ci_alpha" --with "ci_plain=$fx/ci_plain" "$fx/ci_beta"
-expect_status 0 "unlisted modules come after, listed ids hold" "$d" --env "$env_c" exec \
-    'for m in ci_alpha ci_beta ci_plain; do printf "%s=%s " "$m" "$(fa-ci-ext-id "$m")"; done'
-expect_contains "ci_alpha keeps 5" "ci_alpha=5" "$OUT"
-expect_contains "ci_beta keeps 7" "ci_beta=7" "$OUT"
-expect_contains "ci_plain comes after the highest" "ci_plain=12" "$OUT"
-expect_status 0 "the modules are recorded with their ids" "$d" --env "$env_c" status
-expect_contains "ids in the label" "ci_alpha:5" "$OUT"
-
-expect_status 0 "a row to find in the dump" "$d" --env "$env_c" exec \
-    "mariadb -h localhost -u fa -pfa fa_test -e \"INSERT INTO 0_ci_alpha (marker) VALUES (CONCAT('in', '-the-dump'))\""
-expect_status 0 "db dump writes a gzipped file" "$d" --env "$env_c" db dump "$TMP_A/dump.sql.gz"
-expect_status 0 "that is a real dump" sh -c "gunzip -c '$TMP_A/dump.sql.gz' | grep -q 'in-the-dump'"
-expect_status 0 "a row the load must remove" "$d" --env "$env_c" exec \
-    "mariadb -h localhost -u fa -pfa fa_test -e \"INSERT INTO 0_ci_alpha (marker) VALUES (CONCAT('after', '-the-dump'))\""
-expect_status 0 "db load" "$d" --env "$env_c" db load "$TMP_A/dump.sql.gz"
-expect_status 0 "restores the dump" "$d" --env "$env_c" exec \
-    "mariadb -h localhost -u fa -pfa -N fa_test -e 'SELECT marker FROM 0_ci_alpha'"
-expect_contains "the dumped row" "in-the-dump" "$OUT"
-expect_absent "not the later one" "after-the-dump" "$OUT"
-expect_status 0 "db load re-activates" "$d" --env "$env_c" exec \
-    'php -r "include \"/var/www/html/company/0/installed_extensions.php\"; foreach (\$installed_extensions as \$id => \$e) echo \$e[\"package\"], \"@\", \$id, \"=\", \$e[\"active\"] ? \"on\" : \"off\", \"\n\";"'
-expect_contains "ci_alpha on at 5" "ci_alpha@5=on" "$OUT"
-
-expect_status 0 "a mail is caught" "$d" --env "$env_c" exec \
-    'php -r "mail(\"a@example.com\", \"dev mail \" . \"subject\", \"body\");"'
-expect_status 0 "mail list shows it" "$d" --env "$env_c" mail list
-expect_contains "an .eml" ".eml" "$OUT"
-eml="$(printf '%s\n' "$OUT" | grep '\.eml$' | head -n 1)"
-expect_status 0 "mail show prints it" "$d" --env "$env_c" mail show "$eml"
-expect_contains "the subject" "dev mail subject" "$OUT"
-expect_status 0 "mail clear" "$d" --env "$env_c" mail clear
-expect_status 0 "leaves none" "$d" --env "$env_c" mail list
-expect_contains "none" "(no mail)" "$OUT"
-expect_status 0 "destroy it" "$d" --env "$env_c" destroy --yes
-
-env_e="citest$$e"
-port_e="$(free_port)"
-expect_status 0 "--dataset <file> creates an environment from a backup" \
-    "$d" --env "$env_e" up --port "$port_e" --dataset "$TMP_A/dump.sql.gz" --with "ci_alpha=$fx/ci_alpha"
-expect_status 0 "with the backup's data" "$d" --env "$env_e" exec \
-    "mariadb -h localhost -u fa -pfa -N fa_test -e 'SELECT marker FROM 0_ci_alpha'"
-expect_contains "the dumped row" "in-the-dump" "$OUT"
-expect_status 0 "destroy it" "$d" --env "$env_e" destroy --yes
-expect_status 2 "a missing dataset file is refused before anything starts" \
-    "$d" --env "$env_e" up --dataset "$TMP_A/nope.sql" --with "ci_alpha=$fx/ci_alpha"
-expect_status 0 "and nothing was created" sh -c "! docker inspect fa-dev-$env_e >/dev/null 2>&1"
-```
-
-- [ ] **Step 2: Run it to verify it fails**
-
-Run: `FA_CI_IMAGE=fa-ci:local-cp-7.4 docker/ci/test/dev.sh`
-Expected: the Task 2 cases pass. The new cases FAIL from "--extensions registers modules…" (`usage:` on the unknown option).
-
-- [ ] **Step 3: Implement**
-
-In `docker/ci/plugin-dev.sh`:
-
-1. Header: add to the up options
-
-```bash
-#   --dataset <file>       ... or a .sql/.sql.gz on this machine (a backup), loaded as it is
-#   --extensions <file>    an installed_extensions.php (a live site's): its modules keep
-#                          the extension ids it gives them, so a copy of that site's
-#                          database keeps its users' access
-```
-
-and to the command synopsis:
-
-```bash
-#   docker/ci/plugin-dev.sh [--env NAME] activate | mail [list|show <file>|clear]
-#   docker/ci/plugin-dev.sh [--env NAME] db dump [file] | db load <file> | db shell
-```
-
-2. In `cmd_up`'s option loop, add `--extensions) extensions="$2"; given=yes; shift 2 ;;` and declare `local extensions=''`.
-3. Replace the dataset check with:
-
-```bash
-    local dataset_file=''
-    case "$dataset" in
-        test|demo) ;;
-        *)
-            [ -f "$dataset" ] || { printf 'plugin-dev.sh: no such dataset file: %s\n' "$dataset" >&2; exit 2; }
-            dataset_file="$(cd "$(dirname "$dataset")" && pwd)/$(basename "$dataset")" ;;
-    esac
-    [ -z "$extensions" ] || [ -f "$extensions" ] || { printf 'plugin-dev.sh: no such file: %s\n' "$extensions" >&2; exit 2; }
-```
-
-4. After `ci_boot` and before the dataset step, order the modules by the extension list when one is given. Replace the lines building `modules` and the `fa-dev.modules` label with this, placed after `ci_boot`. The label then has to be written after boot, so drop `fa-dev.modules` from `run_args` and keep it in a file inside the container: `/var/lib/fa-dev/modules`.
-
-```bash
-    local modules=("${CI_WITH_NAMES[@]+"${CI_WITH_NAMES[@]}"}")
-    [ -z "$name" ] || modules+=("$name")
-    if [ -n "$extensions" ]; then
-        docker cp "$extensions" "$CONTAINER:/tmp/fa-dev-extensions.php"
-        # Ids from the site's list; activation keeps the --with order, because
-        # modules depend on each other (sgw_sales on graphql's tables, say).
-        local ordered=() listed id m
-        listed="$(docker exec "$CONTAINER" fa-ci-ext-list /tmp/fa-dev-extensions.php)"
-        for m in "${modules[@]}"; do
-            id="$(printf '%s\n' "$listed" | awk -v m="$m" '$2 == m {print $1; exit}')"
-            if [ -n "$id" ]; then ordered+=("$m:$id"); else ordered+=("$m"); fi
-        done
-        # Unlisted modules get ids after every id the site has used.
-        local next
-        next="$(docker exec "$CONTAINER" php -r '$next_extension_id = 1; $installed_extensions = array(); include "/tmp/fa-dev-extensions.php"; echo max((int) $next_extension_id, count($installed_extensions) ? max(array_keys($installed_extensions)) + 1 : 1);')"
-        docker exec -u www-data "$CONTAINER" php -r '$f = $argv[1]; $s = file_get_contents($f); file_put_contents($f, preg_replace("/next_extension_id = \\d+/", "next_extension_id = " . $argv[2], $s));' "$FA/installed_extensions.php" "$next"
-        modules=("${ordered[@]}")
-    fi
-    docker exec "$CONTAINER" sh -c "mkdir -p /var/lib/fa-dev && printf '%s\n' '${modules[*]-}' > /var/lib/fa-dev/modules"
-```
-
-5. Change the dataset step to load a file too:
-
-```bash
-    if [ "$fresh" = yes ] && [ -n "$dataset_file" ]; then
-        log "dataset: $dataset_file"
-        docker cp "$dataset_file" "$CONTAINER:/tmp/fa-dev-dataset.${dataset_file##*.}"
-        docker exec "$CONTAINER" fa-ci-dataset "/tmp/fa-dev-dataset.${dataset_file##*.}"
-    elif [ "$fresh" = yes ] && [ "$dataset" != test ]; then
-        log "dataset: $dataset"
-        docker exec "$CONTAINER" fa-ci-dataset "$dataset"
-    fi
-```
-
-A `.sql.gz` copies as `fa-dev-dataset.gz`, which `fa-ci-dataset` gunzips because it ends in `.gz`. A `.sql` copies as `fa-dev-dataset.sql`.
-
-6. Replace `label modules` wherever it's read (`report`, `status`) with a function:
-
-```bash
-modules() { docker exec "$CONTAINER" cat /var/lib/fa-dev/modules 2>/dev/null || true; }
-```
-
-`/var/lib/fa-dev` is in the container's filesystem, so it persists with the container and goes with `destroy`.
-
-7. New commands in `main`:
-
-```bash
-        activate)
-            set_env; require_env
-            # shellcheck disable=SC2046 # the recorded list is space-separated names
-            ci_activate "$CONTAINER" $(modules)
-            if [ -n "$(label init)" ]; then log "init: $(label init)"; ci_as_user "$CONTAINER" "$(plugin_dir)" "$(label init)"; fi ;;
-        db)
-            set_env; require_env
-            case "${1:-}" in
-                dump)
-                    local out="${2:-fa-dev-$ENV-$(date +%Y%m%d-%H%M%S).sql.gz}"
-                    docker exec "$CONTAINER" sh -c 'mariadb-dump --single-transaction --routines fa_test | gzip -c' > "$out"
-                    gzip -t "$out"
-                    log "dumped to $out" ;;
-                load)
-                    [ -f "${2:-}" ] || { printf 'plugin-dev.sh: no such file: %s\n' "${2:-}" >&2; exit 2; }
-                    local src="$2"
-                    docker cp "$src" "$CONTAINER:/tmp/fa-dev-dataset.${src##*.}"
-                    docker exec "$CONTAINER" fa-ci-dataset "/tmp/fa-dev-dataset.${src##*.}"
-                    "$0" --env "$ENV" activate ;;
-                shell) docker exec -it "$CONTAINER" mariadb fa_test ;;
-                *) die "usage: plugin-dev.sh [--env NAME] db dump [file] | db load <file> | db shell" ;;
-            esac ;;
         mail)
-            set_env; require_env
+            require_env
             case "${1:-list}" in
                 list) docker exec "$CONTAINER" sh -c 'cd /var/mail-catcher && ls -1t -- *.eml 2>/dev/null || echo "(no mail)"' ;;
                 show) [ -n "${2:-}" ] || die "usage: plugin-dev.sh [--env NAME] mail show <file>"
@@ -919,69 +883,136 @@ modules() { docker exec "$CONTAINER" cat /var/lib/fa-dev/modules 2>/dev/null || 
                 clear) docker exec "$CONTAINER" sh -c 'rm -f /var/mail-catcher/*.eml' ;;
                 *) die "usage: plugin-dev.sh [--env NAME] mail [list|show <file>|clear]" ;;
             esac ;;
+        db)
+            require_env
+            case "${1:-}" in
+                dump)
+                    local out="${2:-fa-dev-$ENV_NAME-$(date +%Y%m%d-%H%M%S).sql.gz}"
+                    docker exec "$CONTAINER" sh -c 'mariadb-dump --single-transaction --routines fa_test | gzip -c' > "$out"
+                    gzip -t "$out"
+                    log "dumped to $out" ;;
+                load)
+                    [ -f "${2:-}" ] || { printf 'plugin-dev.sh: no such file: %s\n' "${2:-}" >&2; exit 2; }
+                    load_config
+                    docker cp "$2" "$CONTAINER:/tmp/fa-dev-dataset.${2##*.}"
+                    docker exec "$CONTAINER" fa-ci-dataset "/tmp/fa-dev-dataset.${2##*.}"
+                    activate_all ;;
+                shell) docker exec -it "$CONTAINER" mariadb fa_test ;;
+                *) die "usage: plugin-dev.sh [--env NAME] db dump [file] | db load <file> | db shell" ;;
+            esac ;;
+        *) printf 'plugin-dev.sh: unknown command %s\n' "$CMD" >&2; exit 1 ;;
+    esac
+}
+main "$@"
 ```
 
-Also add these commands to the top-level usage message.
+`docker/ci/dev/example.env`:
 
-8. Add to `docker/ci/README.md` a section after "Locally":
+```sh
+# A development environment's settings: copy to docker/ci/dev/<env>.env (the
+# default env is "dev") and run docker/ci/plugin-dev.sh [--env <env>] up.
+# FA_DEV_* variables set in your shell win over this file.
+
+# Folders of modules/ to activate, in order (a module that needs another comes after it).
+FA_DEV_MODULES="sgw_sales graphql"
+
+# Apache's port on this machine.
+FA_DEV_PORT=8100
+
+# test, demo, or a .sql/.sql.gz backup. Loaded only when the environment is created.
+FA_DEV_DATASET=demo
+
+# A live site's installed_extensions.php, so a copy of its database keeps its
+# users' access: the modules keep the extension ids it lists.
+#FA_DEV_EXTENSIONS=~/backups/installed_extensions.php
+
+# Themes (folders of this checkout's themes/) to mount.
+#FA_DEV_THEMES=bootstrap
+
+# Run each activated module's own tools/init.sh after activation (yes/no).
+#FA_DEV_INIT=yes
+
+# The folder mounted as modules/ (default: this checkout's modules/), and
+# more mounts, e.g. a plugin checked out elsewhere over its folder:
+#FA_DEV_MODULES_ROOT=/path/to/frontaccounting/modules
+#FA_DEV_MOUNTS="/path/to/graphql-worktree:/var/www/html/modules/graphql"
+```
+
+In `.gitignore`, add:
+
+```
+/docker/ci/dev/*.env
+!/docker/ci/dev/example.env
+```
+
+In `docker/ci/README.md`, add after the "Locally" section:
 
 ````markdown
 ## Development environments
 
-`plugin-dev.sh` keeps an environment running between sessions: the same image,
-with its database on a volume and FrontAccounting on a fixed port.
+`plugin-dev.sh` keeps FrontAccounting running between sessions from the same
+image. It mounts your checkout's whole `modules/` folder, so edits are live on
+the next request. Its database is on a volume, and it listens on a fixed port.
+Which modules are extensions in it is opt-in, in `docker/ci/dev/<env>.env`:
 
-    ../frontaccounting/docker/ci/plugin-dev.sh up --dataset demo \
-      --with sgw_sales=../sgw_sales --init 'sh tools/init.sh' .
-    ../frontaccounting/docker/ci/plugin-dev.sh status      # from the plugin's directory
-    ../frontaccounting/docker/ci/plugin-dev.sh shell
-    ../frontaccounting/docker/ci/plugin-dev.sh mail list
-    ../frontaccounting/docker/ci/plugin-dev.sh down        # stop; the data stays
-    ../frontaccounting/docker/ci/plugin-dev.sh destroy --yes
+    cp docker/ci/dev/example.env docker/ci/dev/dev.env    # then edit FA_DEV_MODULES
+    docker/ci/plugin-dev.sh up          # create it, or start it again
+    docker/ci/plugin-dev.sh link        # after changing FA_DEV_MODULES
+    docker/ci/plugin-dev.sh status
+    docker/ci/plugin-dev.sh shell
+    docker/ci/plugin-dev.sh exec --dir modules/graphql composer test
+    docker/ci/plugin-dev.sh mail list
+    docker/ci/plugin-dev.sh down        # stop; the data stays
+    docker/ci/plugin-dev.sh destroy --yes
 
-`up` creates the environment the first time and starts it after that. Its
-options only apply when it is created. The environment is named after the
-plugin's module (`--env` to choose), and its URL is `http://localhost:8100/`
-unless you pass `--port`. `--with NAME=PATH` modules and `--theme NAME=PATH`
-themes are mounted live.
+`--env NAME` keeps several side by side, each with its own
+`docker/ci/dev/NAME.env`, port and database. After activation, each module's
+own `tools/init.sh` (if it has one) runs in its directory.
 
-A copy of a real site: pass its backup as `--dataset site.sql.gz` and its
-`installed_extensions.php` as `--extensions`. The modules then keep the
-extension ids the site's security roles were built with. Sign in as your own
-users, or as `test`/`test`. Mail is caught (`mail list`), never sent.
+A copy of a real site: set `FA_DEV_DATASET` to its backup and
+`FA_DEV_EXTENSIONS` to its `installed_extensions.php`. The modules then keep
+the extension ids the site's security roles were built with. Set
+`FA_DEV_INIT=no` to add nothing to the copy. Sign in as your own users, or
+as `test`/`test`. Mail is caught (`mail list`), never sent.
 
 `db dump [file]` writes the database out. `db load <file>` replaces it and
-activates the modules again. `activate` re-runs activation after you fix
-something that stopped it.
+activates the modules again, so their install SQL runs on the new data.
+`activate` does that without a load, e.g. after fixing whatever stopped an
+activation.
 ````
+
+Run: `chmod +x docker/ci/plugin-dev.sh`.
 
 - [ ] **Step 4: Run the tests**
 
 Run: `FA_CI_IMAGE=fa-ci:local-cp-7.4 docker/ci/test/dev.sh`
-Expected: `0 failed`.
+Expected: `0 failed`. If "a busy port is reported" fails because `ss` isn't on the host, keep the check. Detect docker's `port is already allocated` in the failed `docker run` instead: in `cmd_up`, run `ci_boot` with its output captured, and on that message die with `port N is already in use`, having removed the half-made container and its fresh volume. Say so in the report.
 
 Then, once: `FA_CI_IMAGE=fa-ci:local-cp-7.4 docker/ci/test/run.sh`
 Expected: `all passed`.
 
-Run: `docker run --rm -v "$PWD":/mnt -w /mnt koalaman/shellcheck:stable -x docker/ci/plugin-dev.sh docker/ci/test/dev.sh`
-Expected: clean.
+Run: `docker run --rm -v "$PWD":/mnt -w /mnt koalaman/shellcheck:stable -x docker/ci/plugin-dev.sh docker/ci/test/dev.sh docker/ci/test/run.sh`
+Expected: clean. Targeted disables are fine where a single-quoted string is deliberately passed into the container.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add docker/ci/plugin-dev.sh docker/ci/test/dev.sh docker/ci/README.md
-git -c user.name=Cambell -c user.email=cambell.prince@gmail.com commit -m "ci: Backups, live extension ids, db and mail for dev environments
+git add docker/ci/plugin-dev.sh docker/ci/dev/example.env docker/ci/test/dev.sh docker/ci/test/run.sh docker/ci/README.md .gitignore
+git update-index --chmod=+x docker/ci/plugin-dev.sh docker/ci/test/dev.sh
+git -c user.name=Cambell -c user.email=cambell.prince@gmail.com commit -m "ci: plugin-dev.sh, persistent development environments
 
---dataset takes a backup file, loaded as it is; --extensions registers the
-modules under a live site's extension ids so its users keep their access.
-db dump/load/shell, mail list/show/clear, and activate to retry activation.
+The checkout's modules/ folder is mounted whole, so edits are live; which of
+its folders are extensions is opt-in (FA_DEV_MODULES, per environment in
+docker/ci/dev/<env>.env), applied with link without recreating anything.
+Databases persist on a volume; backups and a live site's extension ids load
+a copy of that site; db dump/load, mail, shell and exec.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 4: graphql moves onto the dev mode
+### Task 3: graphql moves onto the dev mode
 
 **Files (graphql worktree):**
 - Create: `tools/init.sh`, `tools/dev-fixtures.sh`
@@ -991,9 +1022,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Modify: `README.md` (the development section), `.gitignore` (drop `docker/.env`), `.github/workflows/ci.yml` (drop the comment that says `docker/fa-graphql` stays)
 
 **Interfaces:**
-- Consumes (Tasks 1-3): `plugin-dev.sh` (`up --dataset demo --with --init --port`, `exec`, `mail`, `db dump`, `destroy --yes`) and `plugin-test.sh`, from `$FA_CI`, with the image `fa-ci:local-cp-7.4`.
+- Consumes (Tasks 1-2): `plugin-dev.sh` (`FA_DEV_*`, `up`, `exec --dir`, `mail`, `db dump`, `destroy --yes`, the `tools/init.sh` convention) and `plugin-test.sh`, from `$FA_CI`, with the image `fa-ci:local-cp-7.4`.
 - Produces:
-  - `tools/init.sh`: writes `config_graphql.php` if it's absent, then runs `tests/data/seed.sh`. Used by `tools/ci.sh` and as the dev environment's `--init`.
+  - `tools/init.sh`: writes `config_graphql.php` if it's absent, then runs `tests/data/seed.sh`. It's the dev convention's init and is also used by `tools/ci.sh`.
   - `tools/dev-fixtures.sh`: `tests/data/dev-fixtures.sql`, then `php tools/fixtures.php`.
 
 - [ ] **Step 1: The scripts**
@@ -1002,11 +1033,11 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ```sh
 #!/bin/sh
-# Prepares this module in the FrontAccounting CI image, after activation: a
+# Prepares this module in the FrontAccounting CI image after activation: a
 # config_graphql.php if there is none (a random secret, insecure login allowed,
 # debug on — never for production), and the users and roles the tests and the
-# dev fixtures sign in as (tests/data/seed.sh). Used by tools/ci.sh and as the
-# development environment's --init.
+# dev fixtures sign in as (tests/data/seed.sh). Run by tools/ci.sh, and by the
+# CI package's development environments after they activate this module.
 set -eu
 : "${FA_ROOT:?run this inside the FrontAccounting CI image (docker/ci)}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
@@ -1026,8 +1057,8 @@ sh "$here/tests/data/seed.sh"
 # Example hosting-billing data for a development environment: the HDOM/HGEN1
 # items and prices (tests/data/dev-fixtures.sql), then a reseller customer, its
 # recurring orders, an invoice and a payment created through the GraphQL API
-# itself (tools/fixtures.php). Idempotent. Run inside the environment:
-#   ../frontaccounting/docker/ci/plugin-dev.sh exec sh tools/dev-fixtures.sh
+# itself (tools/fixtures.php). Idempotent. From the FrontAccounting checkout:
+#   docker/ci/plugin-dev.sh --env graphql exec --dir modules/graphql sh tools/dev-fixtures.sh
 set -eu
 : "${FA_ROOT:?run this inside the FrontAccounting CI image (plugin-dev.sh exec)}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
@@ -1038,7 +1069,9 @@ php "$here/tools/fixtures.php" "${FA_URL%/}/modules/graphql/"
 
 Run: `git mv docker/fixtures.php tools/fixtures.php`. In `tools/fixtures.php`:
 - change the default URL line to `$url = $argv[1] ?? (getenv('FA_GRAPHQL_URL') ?: rtrim((string) (getenv('FA_URL') ?: 'http://localhost'), '/') . '/modules/graphql/');`;
-- update its header comment: "Run by tools/dev-fixtures.sh inside a development environment (docker/ci/plugin-dev.sh in cambell-prince/frontaccounting)". Drop the sentence about `.htaccess` and `docker/`. `tools/` is not served either: `.htaccess` routes everything through `index.php`. Check that `.htaccess` really denies `tools/`. If it doesn't, add a `tools/` deny rule to `.htaccess` the same way `docker/` was denied.
+- change its header comment to say it's run by `tools/dev-fixtures.sh` in a development environment (`docker/ci/plugin-dev.sh` in cambell-prince/frontaccounting). Drop the sentence about `.htaccess` and `docker/`.
+
+Check that `.htaccess` stops `tools/` from being served. If it doesn't, add a deny rule for `tools/` the way `docker/` was denied.
 
 In `tools/ci.sh`, replace the block from `echo "==> config and seed"` through `sh tests/data/seed.sh` with:
 
@@ -1065,14 +1098,18 @@ Expected: `Tests: 966, ... Skipped: 1.`, `OK (66 tests`, `OK (1 test`, `==> all 
 
 - [ ] **Step 3: The dev environment works end to end**
 
+This uses the user's own `modules/` folder (`/home/cambell/src/sgw/frontaccounting/modules`, where `sgw_sales` is checked out with its `vendor/`), with this worktree mounted over its `graphql` folder, a spare port and a throwaway env name. It never touches the user's `docker/ci/dev/*.env` or their running graphql stack.
+
 ```bash
 TMP_A=$(mktemp -d)
+WT=/home/cambell/src/sgw/frontaccounting/.claude/worktrees/graphql-dev
 PORT=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
-FA_CI_IMAGE=fa-ci:local-cp-7.4 "$FA_CI/plugin-dev.sh" --env gqlcheck up --port "$PORT" --dataset demo \
-  --setup 'composer install --no-interaction --no-progress' \
-  --with sgw_sales=https://github.com/saygoweb/frontaccounting-module-sgw_sales.git@master \
-  --init 'sh tools/init.sh' .
-"$FA_CI/plugin-dev.sh" --env gqlcheck exec sh tools/dev-fixtures.sh
+export FA_DEV_IMAGE=fa-ci:local-cp-7.4 FA_DEV_PORT="$PORT" FA_DEV_DATASET=demo \
+       FA_DEV_MODULES="sgw_sales graphql" \
+       FA_DEV_MODULES_ROOT=/home/cambell/src/sgw/frontaccounting/modules \
+       FA_DEV_MOUNTS="$WT:/var/www/html/modules/graphql"
+"$FA_CI/plugin-dev.sh" --env gqlcheck --config /dev/null up
+"$FA_CI/plugin-dev.sh" --env gqlcheck exec --dir modules/graphql sh tools/dev-fixtures.sh
 curl -fsS -H 'Content-Type: application/json' \
   --data '{"query":"mutation { login(user: \"apitest\", password: \"password\") { accessToken } }"}' \
   "http://localhost:$PORT/modules/graphql/" | head -c 300; echo
@@ -1082,12 +1119,12 @@ rm -rf "$TMP_A"
 ```
 
 Expected:
-- `up` ends by printing the URL.
+- `up` shows `init: graphql (tools/init.sh)` and `seeded: graphql is extension 2`, and ends with the URL.
 - The fixtures report the example reseller customer, its orders, the invoice and the payment.
-- The `login` mutation returns an `accessToken`. If the schema's login mutation has another shape, check `README.md` for the right one and use it.
+- The `login` mutation returns an `accessToken`. If the schema's login mutation has another shape, check `README.md` for the right one.
 - The dump exists, and destroy leaves no `fa-dev-gqlcheck` container or volume.
 
-If `config_graphql.php` in this worktree already has `allow_insecure_login` set to false, the login fails. It's written only when absent, so delete it first (it's gitignored).
+If `vendor/` is missing in the worktree, Step 2's `--setup` installed it; run Step 2 first. If the worktree's `config_graphql.php` has `allow_insecure_login` false, delete it; it's gitignored and `tools/init.sh` rewrites it.
 
 - [ ] **Step 4: Delete `docker/` and update the docs**
 
@@ -1097,18 +1134,25 @@ Run: `git rm -r -q docker`, then `git grep -n 'fa-graphql\|docker/'` and update 
 ````markdown
 ## Development
 
-A development environment (FrontAccounting's CI package, `docker/ci/plugin-dev.sh`
-in cambell-prince/frontaccounting, checked out beside this repository) keeps
-FrontAccounting with this module and sgw_sales running on
-`http://localhost:8100/`, the endpoint saygoweb.com-my's `FA_ENDPOINT` uses:
+Develop in a development environment of FrontAccounting's CI package
+(`docker/ci/plugin-dev.sh` in the FrontAccounting checkout this module lives
+in, as `modules/graphql`). It mounts that checkout's `modules/` folder, so
+edits here are live, and keeps FrontAccounting with this module and sgw_sales
+on `http://localhost:8100/`, the endpoint saygoweb.com-my's `FA_ENDPOINT`
+uses. Its settings are in the FrontAccounting checkout, in
+`docker/ci/dev/graphql.env`:
 
-    ../frontaccounting/docker/ci/plugin-dev.sh up --dataset demo \
-      --setup 'composer install --no-interaction --no-progress' \
-      --with sgw_sales=../sgw_sales --init 'sh tools/init.sh' .
-    ../frontaccounting/docker/ci/plugin-dev.sh exec sh tools/dev-fixtures.sh   # example reseller data
-    ../frontaccounting/docker/ci/plugin-dev.sh exec composer test              # the suite, in the environment
-    ../frontaccounting/docker/ci/plugin-dev.sh mail list                       # mail it caught
-    ../frontaccounting/docker/ci/plugin-dev.sh shell
+    FA_DEV_MODULES="sgw_sales graphql"
+    FA_DEV_PORT=8100
+    FA_DEV_DATASET=demo
+
+Then, from the FrontAccounting checkout:
+
+    docker/ci/plugin-dev.sh --env graphql up        # config_graphql.php and the API users via tools/init.sh
+    docker/ci/plugin-dev.sh --env graphql exec --dir modules/graphql sh tools/dev-fixtures.sh
+    docker/ci/plugin-dev.sh --env graphql exec --dir modules/graphql composer test
+    docker/ci/plugin-dev.sh --env graphql mail list
+    docker/ci/plugin-dev.sh --env graphql shell
 
 `http://localhost:8100/modules/graphql/` in a browser shows Voyager. Sign in to
 FrontAccounting as admin/password or test/test. The API users are apitest,
@@ -1116,13 +1160,13 @@ noapi and apiorders (password `password`).
 
 Anorm's generator runs against the environment's database:
 
-    ../frontaccounting/docker/ci/plugin-dev.sh exec 'php vendor/bin/anorm.php --host=localhost --user=fa --password=fa make fa_test <table> -p ...'
+    docker/ci/plugin-dev.sh --env graphql exec --dir modules/graphql 'php vendor/bin/anorm.php --host=localhost --user=fa --password=fa make fa_test <table> -p ...'
 
-To work on anorm-graphql at the same time, mount its checkout and point
-composer at it (locally only, never committed):
+To work on anorm-graphql at the same time, add its checkout to
+`FA_DEV_MOUNTS` (`/path/to/anorm-graphql:/opt/anorm-graphql`) when you create
+the environment, then point composer at it (locally only, never committed):
 
-    ../frontaccounting/docker/ci/plugin-dev.sh up ... --mount "$(cd ../anorm-graphql && pwd):/opt/anorm-graphql" .
-    ../frontaccounting/docker/ci/plugin-dev.sh exec 'composer config repositories.local "{\"type\": \"path\", \"url\": \"/opt/anorm-graphql\", \"options\": {\"symlink\": true}}" && composer update saygoweb/anorm-graphql'
+    docker/ci/plugin-dev.sh --env graphql exec --dir modules/graphql 'composer config repositories.local "{\"type\": \"path\", \"url\": \"/opt/anorm-graphql\", \"options\": {\"symlink\": true}}" && composer update saygoweb/anorm-graphql'
 
 Before committing, run `composer config --unset repositories.local` and
 `composer update saygoweb/anorm-graphql`, so `composer.lock` names the
@@ -1131,10 +1175,10 @@ released version again.
 
 - `.gitignore`: remove the `docker/.env` line.
 - `.github/workflows/ci.yml`: remove the comment line saying `docker/fa-graphql` stays the development stack.
-- Anything else that names `docker/fa-graphql` (`phpunit` configs, tests, `composer.json` script descriptions): point it at the dev mode or `tools/`, or drop the reference.
+- Anything else naming `docker/fa-graphql` (phpunit configs, tests, `composer.json` script descriptions): point it at the dev environment or `tools/`, or drop the reference.
 
 Run: `docker run --rm -v "$PWD":/repo -w /repo rhysd/actionlint:latest -color .github/workflows/ci.yml`
-Expected: nothing, or only the note that the remote reusable workflow can't be fetched.
+Expected: nothing, or only the remote-workflow note.
 
 - [ ] **Step 5: Commit**
 
@@ -1144,17 +1188,18 @@ git update-index --chmod=+x tools/init.sh tools/dev-fixtures.sh
 git status --short
 git -c user.name=Cambell -c user.email=cambell.prince@gmail.com commit -m "dev: Develop in the FrontAccounting CI package's dev environments
 
-tools/init.sh (config and seed, shared with tools/ci.sh) and
-tools/dev-fixtures.sh replace docker/fa-graphql's setup and db fixtures; the
-package's plugin-dev.sh gives the persistent environment on port 8100 that
-saygoweb.com-my points at. docker/ is gone.
+tools/init.sh (config and seed, shared with tools/ci.sh and run by the dev
+environments after activation) and tools/dev-fixtures.sh replace
+docker/fa-graphql's setup and db fixtures. The package's plugin-dev.sh gives
+the persistent environment, with this checkout mounted live, on port 8100
+where saygoweb.com-my points. docker/ is gone.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Wave 5 (controller): publish, adopt, move the user's dev data
+### Wave 4 (controller): publish, adopt, move the user's dev data
 
 - [ ] FA fork:
   1. Run `docker/ci/test/run.sh` on the cp 7.4 image.
@@ -1165,9 +1210,18 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   1. Push `dev/fa-ci-dev` and open a PR.
   2. Wait for CI (the four matrix jobs at spec §5's counts).
   3. Merge when the user says.
-- [ ] The user's current graphql dev stack (`fa-graphql-graphql-*`, on port 8100) must go before the new environment can take 8100. Ask first. Then:
-  1. dump its database (`docker exec fa-graphql-graphql-db-1 sh -c 'mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" fa_graphql' | gzip > ~/fa-graphql-dev.sql.gz`, credentials as that stack set them);
-  2. remove its containers and volume;
-  3. `up` the new environment from the graphql checkout with `--dataset ~/fa-graphql-dev.sql.gz`, and the same modules, so the user keeps their dev data.
+- [ ] The user's graphql dev stack (`fa-graphql-graphql-*`, on port 8100) must go before the new environment can take 8100. **Ask first.** Then:
+  1. Dump its database:
 
-  graphql's old stack registered graphql as extension 1 and sgw_sales as 2. Pass an `--extensions` file with those ids so the dump's roles still match.
+     ```
+     docker exec fa-graphql-graphql-db-1 sh -c 'mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" fa_graphql' | gzip > ~/fa-graphql-dev.sql.gz
+     ```
+
+  2. Remove its containers and volume.
+  3. Write the user's `docker/ci/dev/graphql.env` in their FA checkout:
+     - `FA_DEV_MODULES="sgw_sales graphql"`
+     - `FA_DEV_PORT=8100`
+     - `FA_DEV_DATASET=~/fa-graphql-dev.sql.gz`
+     - `FA_DEV_EXTENSIONS=` a file giving graphql id 1 and sgw_sales id 2, as the old stack registered them, so the dump's roles still match
+  4. Run `docker/ci/plugin-dev.sh --env graphql up`.
+  5. Confirm the example reseller and its orders are there and the saygoweb.com-my client reaches it.
