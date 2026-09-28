@@ -78,9 +78,12 @@ your checkout stay yours. The environment has:
 - `FA_DB_HOST`, `FA_DB_NAME`, `FA_DB_USER` and `FA_DB_PASSWORD` (`localhost`,
   `fa_test`, `fa`, `fa`), and `FA_DB_PREFIX=0_`.
 
-Helpers for a plugin's own setup: `fa-ci-ext-id <module>` prints a module's
-extension id, which follows activation order, so derive security codes from
-it: section `(id << 16) | (100 << 8)`, first area `section | 100`.
+Helpers for the `test` command: these need the module registered and
+activated, so use them there, not in `--setup` (which runs first, before
+registration — `fa-ci-ext-id` would exit 1 and `fa-ci-grant --module` would
+404). `fa-ci-ext-id <module>` prints a module's extension id, which follows
+activation order, so derive security codes from it: section
+`(id << 16) | (100 << 8)`, first area `section | 100`.
 `fa-ci-grant --role <id> --module <name>` adds a module's sections and areas
 to a role, e.g. role 2 for a dataset user your tests sign in as.
 

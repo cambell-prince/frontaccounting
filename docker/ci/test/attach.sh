@@ -60,6 +60,23 @@ expect_contains "to role FA CI" "to role FA CI" "$OUT"
 expect_status 0 "role FA CI holds ci_alpha's area" sql \
     "SELECT 'has-area' FROM 0_security_roles WHERE role = 'FA CI' AND FIND_IN_SET('91236', REPLACE(areas, ';', ','))"
 expect_contains "code 91236" "has-area" "$OUT"
+# ci_alpha's second area, SA_CI_ALPHA_SALES = SS_SALES|71 = (12<<8)|71 = 3143,
+# sits in the CORE section SS_SALES, so add_access_extensions() leaves its
+# section untranslated (it's not one of ci_alpha's own $security_sections
+# entries). With ci_alpha as extension 1 (extcode = 1<<16 = 65536) and this
+# area declared second (acode starts at 100, so this one gets 101):
+#   area    = extcode | SS_SALES | acode = 65536 | 3072 | 101 = 68709
+#   section = area & ~0xff                = 65536 | 3072       = 68608
+# grant.php has to add that section itself: it's not a $security_sections
+# key, so the section scan alone would miss it and the area would stay
+# unreachable (includes/current_user.inc keeps only areas whose section is
+# granted).
+expect_status 0 "role FA CI holds ci_alpha's core-section area" sql \
+    "SELECT 'has-area' FROM 0_security_roles WHERE role = 'FA CI' AND FIND_IN_SET('68709', REPLACE(areas, ';', ','))"
+expect_contains "code 68709" "has-area" "$OUT"
+expect_status 0 "role FA CI holds that area's core section" sql \
+    "SELECT 'has-section' FROM 0_security_roles WHERE role = 'FA CI' AND FIND_IN_SET('68608', REPLACE(sections, ';', ','))"
+expect_contains "code 68608" "has-section" "$OUT"
 expect_status 0 "the test user is on role FA CI" sql \
     "SELECT 'on-fa-ci' FROM 0_users u JOIN 0_security_roles r ON r.id = u.role_id WHERE u.user_id = 'test' AND r.role = 'FA CI'"
 expect_contains "user test" "on-fa-ci" "$OUT"
@@ -72,6 +89,12 @@ expect_contains "reporting what it granted" "of ci_alpha to role 2" "$OUT"
 expect_status 0 "role 2 now holds ci_alpha's section and area" sql \
     "SELECT 'has-both' FROM 0_security_roles WHERE id = 2 AND FIND_IN_SET('91236', REPLACE(areas, ';', ',')) AND FIND_IN_SET('91136', REPLACE(sections, ';', ','))"
 expect_contains "codes 91136 and 91236" "has-both" "$OUT"
+# Same arithmetic as above (extcode 65536 | SS_SALES 3072 | acode 101 = 68709,
+# section 65536 | 3072 = 68608): role 2's grant must add that core section
+# too, not just the area.
+expect_status 0 "role 2 also holds ci_alpha's core-section area and its section" sql \
+    "SELECT 'has-both' FROM 0_security_roles WHERE id = 2 AND FIND_IN_SET('68709', REPLACE(areas, ';', ',')) AND FIND_IN_SET('68608', REPLACE(sections, ';', ','))"
+expect_contains "codes 68608 and 68709" "has-both" "$OUT"
 expect_status 0 "granting again adds nothing" docker exec "$c" fa-ci-grant --role 2 --module ci_alpha
 expect_contains "zero the second time" "granted 0 areas of ci_alpha to role 2" "$OUT"
 expect_status 2 "a malformed grant is refused" docker exec "$c" fa-ci-grant --role two --module ci_alpha

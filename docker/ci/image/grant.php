@@ -8,6 +8,18 @@
 	  (no query)            every section and area, to role "FA CI", which the
 	                        test user is moved to; role 2 is left alone
 	  ?role=N&module=NAME   that module's sections and areas, added to role N
+
+	An area only takes effect once its section is granted too:
+	includes/current_user.inc keeps only areas whose `$code & ~0xff` is in
+	the role's sections. For an area an extension places in a CORE section
+	(section byte < 99<<8), add_access_extensions() leaves that section
+	untranslated (it's not one of the extension's own $security_sections
+	entries), so it never turns up in $security_sections' own keys and a
+	scan of those alone misses it. FA's own role editor
+	(admin/security_roles.php) handles this by deriving the section from
+	each granted area instead of only from $security_sections:
+	`if (($a&~0xffff) && (($a&0xff00)<(99<<8))) $sections[] = $a&~0xff;`
+	Both grant modes below do the same for every area they grant.
 */
 $page_security = 'SA_SECROLES';
 $path_to_root = '..';
@@ -40,6 +52,11 @@ if (isset($_GET['module'])) {
 		if (($area[0] >> 16) == $ext_id && !in_array((string) $area[0], $areas, true)) {
 			$areas[] = (string) $area[0];
 			$added++;
+			if (($area[0] & ~0xffff) && (($area[0] & 0xff00) < (99 << 8))) {
+				$extra = (string) ($area[0] & ~0xff);
+				if (!in_array($extra, $sections, true))
+					$sections[] = $extra;
+			}
 		}
 	update_security_role($role_id, $role['role'], $role['description'], $sections, $areas);
 	echo "granted $added areas of $module to role $role_id\n";
@@ -48,8 +65,14 @@ if (isset($_GET['module'])) {
 
 $sections = array_keys($security_sections);
 $areas = array();
-foreach ($security_areas as $area)
+foreach ($security_areas as $area) {
 	$areas[] = $area[0];
+	if (($area[0] & ~0xffff) && (($area[0] & 0xff00) < (99 << 8))) {
+		$extra = $area[0] & ~0xff;
+		if (!in_array($extra, $sections, true))
+			$sections[] = $extra;
+	}
+}
 $row = db_fetch(db_query("SELECT id FROM " . TB_PREF . "security_roles WHERE role = 'FA CI'"));
 if ($row) {
 	$role_id = (int) $row['id'];

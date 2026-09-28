@@ -122,7 +122,8 @@ jobs:
           NAME: ${{ inputs.name }}
           TEST: ${{ inputs.test }}
         run: |
-          args=(--fa "$FA" --php "$PHP" --dataset "$DATASET")
+          args=(--fa "$FA" --php "$PHP")
+          [ "$DATASET" = test ] || args+=(--dataset "$DATASET")
           [ -n "$SETUP" ] && args+=(--setup "$SETUP")
           [ -n "$NAME" ] && args+=(--name "$NAME")
           [ "$ACTIVATE" = true ] || args+=(--no-activate)
