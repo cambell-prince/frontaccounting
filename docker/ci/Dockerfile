@@ -46,8 +46,11 @@ COPY image/php.ini /etc/php/${PHP_VERSION}/apache2/conf.d/zz-fa-ci.ini
 COPY image/php.ini /etc/php/${PHP_VERSION}/cli/conf.d/zz-fa-ci.ini
 COPY image/apache-fa-ci.conf /etc/apache2/conf-available/fa-ci.conf
 RUN a2enmod rewrite && a2enconf fa-ci
-# Files Apache creates (tmp/faillog.php, tmp/errors.log) stay writable by the
-# test uid, which runs with group www-data.
+# Files Apache creates with the default mode (e.g. tmp/faillog.php, via
+# fopen) stay group-writable for the test uid, which runs with group
+# www-data. PHP opens its error log (tmp/errors.log) with mode 0644
+# regardless of umask, so that file is created group-writable in the image
+# instead (below), rather than relying on umask 002 to cover it.
 RUN echo 'umask 002' >> /etc/apache2/envvars
 
 COPY image/fa-mail-catcher /usr/local/bin/fa-mail-catcher
@@ -78,6 +81,7 @@ RUN set -eux; \
     cp config.default.php config.php; \
     printf '<?php\n\n$next_extension_id = 1;\n\n$installed_extensions = array (\n);\n' > installed_extensions.php; \
     install -d company/0 company/0/js_cache company/0/pdf_files company/0/backup company/0/images company/0/attachments tmp lang fa-ci; \
+    : > tmp/errors.log; \
     printf '<?php\n\n$installed_extensions = array (\n);\n' > company/0/installed_extensions.php; \
     printf '<?php\n\n$installed_languages = array (\n  0 => array (\n    %s,\n    %s,\n    %s,\n    %s,\n  ),\n);\n\n$dflt_lang = %s;\n' \
         "'code' => 'C'" "'name' => 'English'" "'encoding' => 'iso-8859-1'" "'version' => '1'" "'C'" \
