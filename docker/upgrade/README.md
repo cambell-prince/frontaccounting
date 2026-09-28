@@ -34,15 +34,14 @@ can be scripted.
 
 ## Code that has to go with it
 
-- **sgw_import `fix/anorm3`.** FrontAccounting loads every extension's hooks
-  in one process, and with graphql installed all of them get Anorm 3.2.1.
-  sgw_import `master` (on Anorm ^1.6) declares a static `delete($id)` that
-  Anorm 3.2 forbids. Every sgw_import page then dies part-way through, with a
-  fatal error in the Apache log and nothing on screen. The branch renames the
-  method and requires `^3.2.1`.
-- **Each module's `vendor/`**: run `composer install --no-dev` in `graphql`,
-  `sgw_sales` and `sgw_import` before `gulp upload`, which rsyncs the tree with
-  `--delete`.
+- **sgw_import on Anorm 3** (`master` from 357c567, PR #14). FrontAccounting
+  loads every extension's hooks in one process, and with graphql installed all
+  of them get Anorm 3.2.1. Before that fix, sgw_import declared a static
+  `delete($id)` that Anorm 3.2 forbids, so every sgw_import page died part-way
+  through, with a fatal error in the Apache log and nothing on screen.
+- **The modules' `vendor/`**: `make.phar release` clones each module and the
+  bootstrap theme at the refs in `makefile.json` and installs their composer
+  dependencies for PHP 7.4. Nothing is taken from this checkout's `modules/`.
 - **graphql**: `modules/graphql/config_graphql.php` with a production secret
   (see `config_graphql.example.php`). Don't use the test stack's file, which
   has `allow_insecure_login` and `debug` on.
@@ -80,11 +79,12 @@ can run again.
 
 ## The real upgrade
 
-1. Back up the database and the web root.
+1. Back up the database (`make.phar db-backup`) and the web root.
 2. Pre-flight: run `00-preflight.sql` against live, and fix any duplicate
    sgw_sales schedules.
-3. Deploy the merged `master-ark` plus the modules (with vendor/ and
-   `config_graphql.php`).
+3. `make.phar release`, then `make.phar deploy-check` (read what it would
+   delete), then `make.phar deploy confirm=yes`. Put a production
+   `config_graphql.php` on the server by hand; deploy never sends or deletes it.
 4. Run `10-core-2.4.20.sql`, or open Company Setup and save it.
 5. Install/Activate Extensions: activate graphql (and re-activate sgw_sales)
    for each company.

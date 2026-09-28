@@ -1,0 +1,55 @@
+{
+    "variables": {
+        "ref": "HEAD",
+        "release": "build/release",
+        "components": "modules/graphql|git@github.com:saygoweb/frontaccounting-module-graphql.git|main modules/sgw_sales|git@github.com:saygoweb/frontaccounting-module-sgw_sales.git|master modules/sgw_import|git@github.com:saygoweb/frontaccounting-module-sgw_import.git|master themes/bootstrap|git@github.com:cambell-prince/frontaccounting-theme-bootstrap.git|master|legacy",
+        "php": "7.4.33",
+        "dest": "root@saygoweb.com:/var/www/virtual/saygoweb.com/bms/htdocs/",
+        "remote_user": "vu2006",
+        "confirm": "no",
+        "db_ssh": "root@saygoweb.com",
+        "db": "saygoweb_fa",
+        "db_opts": "",
+        "file": ""
+    },
+    "release": {
+        "by": [
+            "sh deploy/build-release.sh '{{ref}}' '{{release}}' '{{components}}' '{{php}}'"
+        ]
+    },
+    "deploy-check": {
+        "by": [
+            "sh deploy/upload.sh check '{{release}}' '{{dest}}' '{{remote_user}}'"
+        ]
+    },
+    "deploy": {
+        "by": [
+            "sh deploy/upload.sh go '{{release}}' '{{dest}}' '{{remote_user}}' '{{confirm}}'"
+        ]
+    },
+    "package": {
+        "by": [
+            "set -e; test -f '{{release}}.ok' || { echo 'package: run make.phar release first' >&2; exit 1; }; v=$(sed -n 's/^\\$src_version = \"\\(.*\\)\";/\\1/p' version.php); tar -czf build/frontaccounting-$v.tgz -C '{{release}}' --transform 's,^\\.,frontaccounting,' .; echo \"==> build/frontaccounting-$v.tgz\""
+        ]
+    },
+    "db-backup": {
+        "by": [
+            "sh deploy/db-backup.sh '{{db_ssh}}' '{{db}}' '{{db_opts}}'"
+        ]
+    },
+    "db-load": {
+        "by": [
+            "set -e; test -n '{{file}}' || { echo 'db-load: pass file=backup/<dump>.sql.gz' >&2; exit 1; }; docker/fa db reset '{{file}}'"
+        ]
+    },
+    "test": {
+        "by": [
+            "docker/fa test"
+        ]
+    },
+    "clean": {
+        "by": [
+            "rm -rf build log"
+        ]
+    }
+}

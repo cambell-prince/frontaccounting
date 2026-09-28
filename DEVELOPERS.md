@@ -1,15 +1,16 @@
 # Developer Notes
 
-## The use of Gulp
+## Deploying
 
-This is now a rather dated build tool. None the less it can be used "as is".  Here's the recipe ...
+`makefile.json` deploys this branch with [make.phar](https://github.com/saygoweb/phpmake)
+to bms.saygoweb.com; see `deploy/README.md`.
 
-1. Install nvm if not already
-```
-curl https://raw.githubusercontent.com/creationix/nvm/master/install.sh | bash
-```
-2. Install node lts/dubnium `nvm install lts/dubnium`
+    make.phar release          # build/release: this branch plus graphql, sgw_sales, sgw_import and the bootstrap theme
+    make.phar deploy-check     # dry run against the server; read what it would delete
+    make.phar deploy confirm=yes
 
-3. `npm install`
+The demo site takes the same release with another destination:
 
-4. Use gulp with npx e.g. `npx gulp upload`
+    make.phar deploy-check dest=root@saygoweb.com:/var/www/virtual/saygoweb.com/demo/htdocs/frontaccounting/
+
+`make.phar db-backup` dumps the live database into `backup/`.
