@@ -53,6 +53,8 @@ sqlq() { "$d" --env "$1" exec "mariadb -h localhost -u fa -pfa -N fa_test -e \"$
 expect_status 0 "up creates an environment from the config, the shell winning" dev_a up
 expect_contains "and prints its URL" "http://localhost:$port_a/" "$OUT"
 expect_status 0 "FrontAccounting answers on the port" curl -fsS -o /dev/null "http://localhost:$port_a/index.php"
+expect_status 0 "only on this machine by default" docker port "fa-dev-$env_a" 80/tcp
+expect_contains "127.0.0.1" "127.0.0.1:$port_a" "$OUT"
 expect_status 0 "reads the lists" state "$env_a"
 expect_contains "ci_alpha on" "ci_alpha@1=on" "$OUT"
 expect_contains "ci_beta on, after it" "ci_beta@2=on" "$OUT"
@@ -115,8 +117,10 @@ $installed_extensions = array (
   9 => array ('package' => 'not_here', 'name' => 'not_here', 'version' => '-', 'available' => '', 'type' => 'extension', 'path' => 'modules/not_here', 'active' => true),
 );
 PHP
-dev_c() { FA_DEV_MODULES="ci_alpha ci_beta ci_gamma" FA_DEV_PORT="$port_c" FA_DEV_EXTENSIONS="$TMP_A/live-extensions.php" "$d" --env "$env_c" "$@"; }
+dev_c() { FA_DEV_MODULES="ci_alpha ci_beta ci_gamma" FA_DEV_PORT="$port_c" FA_DEV_BIND=0.0.0.0 FA_DEV_EXTENSIONS="$TMP_A/live-extensions.php" "$d" --env "$env_c" "$@"; }
 expect_status 0 "a live site's extension ids, in the list's own order (ci_beta needs ci_alpha first)" dev_c up
+expect_status 0 "FA_DEV_BIND sets the address it listens on" docker port "fa-dev-$env_c" 80/tcp
+expect_contains "all addresses" "0.0.0.0:$port_c" "$OUT"
 expect_status 0 "reads the lists" state "$env_c"
 expect_contains "ci_alpha keeps 5" "ci_alpha@5=on" "$OUT"
 expect_contains "ci_beta keeps 7" "ci_beta@7=on" "$OUT"

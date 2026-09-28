@@ -33,6 +33,8 @@
 #   FA_DEV_THEMES         folders of FA_DEV_THEMES_ROOT to mount under themes/
 #   FA_DEV_THEMES_ROOT    default: the themes/ of this checkout
 #   FA_DEV_PORT           Apache's port on this machine (default 8100)
+#   FA_DEV_BIND           the address it listens on (default 127.0.0.1; 0.0.0.0
+#                         so containers reach it as host.docker.internal)
 #   FA_DEV_DATASET        test, demo, or a .sql/.sql.gz backup (default test)
 #   FA_DEV_EXTENSIONS     an installed_extensions.php (a live site's) whose
 #                         extension ids the modules keep
@@ -43,8 +45,9 @@
 #   FA_DEV_IMAGE          the image (default: FA_DEV_FA cp, FA_DEV_PHP 7.4)
 #
 # The environment is the container fa-dev-<env> (default env: dev), with its
-# database on the volume fa-dev-<env>-db. The mounts, themes, port, image and
-# dataset take effect when it is created; the module list on up and link.
+# database on the volume fa-dev-<env>-db. The mounts, themes, port, address,
+# image and dataset take effect when it is created; the module list on up and
+# link.
 
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -86,6 +89,7 @@ load_config() {
     FA_DEV_THEMES="${FA_DEV_THEMES:-}"
     FA_DEV_THEMES_ROOT="${FA_DEV_THEMES_ROOT:-$checkout/themes}"
     FA_DEV_PORT="${FA_DEV_PORT:-8100}"
+    FA_DEV_BIND="${FA_DEV_BIND:-127.0.0.1}"
     FA_DEV_DATASET="${FA_DEV_DATASET:-test}"
     FA_DEV_EXTENSIONS="${FA_DEV_EXTENSIONS:-}"
     FA_DEV_INIT="${FA_DEV_INIT:-yes}"
@@ -315,7 +319,7 @@ cmd_up() {
         log "keeping the database already in $VOLUME"
     fi
 
-    local run_args=(-p "127.0.0.1:$FA_DEV_PORT:80" -v "$VOLUME:/var/lib/mysql"
+    local run_args=(-p "$FA_DEV_BIND:$FA_DEV_PORT:80" -v "$VOLUME:/var/lib/mysql"
                     -v "$(cd "$FA_DEV_MODULES_ROOT" && pwd):$FA/modules"
                     --label "fa-dev.port=$FA_DEV_PORT" --label "fa-dev.dataset=$FA_DEV_DATASET"
                     --label "fa-dev.fresh=$fresh")
