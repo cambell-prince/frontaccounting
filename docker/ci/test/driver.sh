@@ -69,5 +69,17 @@ expect_status 0 "COMPOSER_CACHE_DIR is mounted for composer" \
     env COMPOSER_CACHE_DIR="$tmp/composer-cache" "$d" --no-activate "$fx/ci_alpha" -- \
     'test "$COMPOSER_CACHE_DIR" = /tmp/composer-cache && touch /tmp/composer-cache/seen'
 expect_status 0 "and writes land in the host directory" test -f "$tmp/composer-cache/seen"
+# shellcheck disable=SC2016 # expands in the container
+expect_status 0 "--dataset demo loads FA's demo data before activation" \
+    "$d" --dataset demo "$fx/ci_alpha" -- \
+    'mariadb -h localhost -u fa -pfa -N fa_test -e "SELECT CONCAT(\"user\", \"=\", user_id) FROM 0_users WHERE user_id IN (\"admin\", \"test\") ORDER BY user_id; SELECT marker FROM 0_ci_alpha; SELECT COUNT(*) FROM 0_debtors_master; SELECT IF(COUNT(*) > 0, CONCAT(\"fiscal\", \"-\", \"covered\"), \"no-year\") FROM 0_fiscal_year WHERE CURDATE() BETWEEN \`begin\` AND \`end\`"'
+expect_contains "the demo admin" "user=admin" "$OUT"
+expect_contains "and the package's test login" "user=test" "$OUT"
+expect_contains "ci_alpha activated on top" "alpha-installed" "$OUT"
+expect_contains "a fiscal year covers today" "fiscal-covered" "$OUT"
+expect_status 0 "--dataset demo keeps the general collation" "$d" --dataset demo "$fx/ci_alpha" -- 'mariadb -h localhost -u fa -pfa -N -e "SELECT DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = \"fa_test\""'
+expect_contains "general_ci after the reload" "utf8mb4_general_ci" "$OUT"
+expect_status 1 "an unknown dataset is refused" "$d" --dataset nope "$fx/ci_alpha" -- true
+expect_contains "naming the choices" "test or demo" "$OUT"
 expect_status 0 "no container is left behind" sh -c "! docker ps -a --format '{{.Names}}' | grep -q '^fa-ci-ci_'"
 finish

@@ -38,6 +38,10 @@ on:
         description: PHP version, 7.4 or 8.3
         type: string
         default: '7.4'
+      dataset:
+        description: The database the run starts from, test (the image's fa_test) or demo (FrontAccounting's demo company)
+        type: string
+        default: test
       image:
         description: The CI image to boot, overriding fa and php (e.g. a pinned -<sha> tag)
         type: string
@@ -111,6 +115,7 @@ jobs:
           FA_CI_IMAGE: ${{ inputs.image }}
           FA: ${{ inputs.fa }}
           PHP: ${{ inputs.php }}
+          DATASET: ${{ inputs.dataset }}
           SETUP: ${{ inputs.setup }}
           WITH: ${{ inputs.with }}
           ACTIVATE: ${{ inputs.activate }}
@@ -118,6 +123,7 @@ jobs:
           TEST: ${{ inputs.test }}
         run: |
           args=(--fa "$FA" --php "$PHP")
+          [ "$DATASET" = test ] || args+=(--dataset "$DATASET")
           [ -n "$SETUP" ] && args+=(--setup "$SETUP")
           [ -n "$NAME" ] && args+=(--name "$NAME")
           [ "$ACTIVATE" = true ] || args+=(--no-activate)

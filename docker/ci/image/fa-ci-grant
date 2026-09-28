@@ -1,15 +1,32 @@
 #!/bin/sh
-# fa-ci-grant: give the System Administrator role (id 2), which the test user
-# holds, every security section and area FrontAccounting knows, extension ones
-# included, through /fa-ci/grant.php. Run it after activating modules, so their
-# pages are open to the tests.
+# fa-ci-grant
+#     Every security section and area FrontAccounting knows, extension ones
+#     included, to a role of its own, "FA CI", which the test user is moved to.
+#     Role 2 is left as the dataset has it: plugins' own fixtures copy it and
+#     assert what it lacks.
+# fa-ci-grant --role <id> --module <name>
+#     One module's sections and areas, added to role <id> (idempotent), e.g.
+#     for a dataset user a plugin's tests sign in as.
+#
+# Codes are worked out inside a FrontAccounting request (/fa-ci/grant.php),
+# since extension codes depend on the module's extension id.
 set -eu
 url="${FA_URL:-http://localhost}"
+query=''
+if [ "$#" -gt 0 ]; then
+    if [ "$#" -ne 4 ] || [ "$1" != --role ] || [ "$3" != --module ]; then
+        echo "usage: fa-ci-grant [--role <id> --module <name>]" >&2
+        exit 2
+    fi
+    case "$2" in ''|*[!0-9]*) echo "fa-ci-grant: --role takes a role id" >&2; exit 2 ;; esac
+    case "$4" in ''|*[!A-Za-z0-9_]*) echo "fa-ci-grant: --module takes a module name" >&2; exit 2 ;; esac
+    query="?role=$2&module=$4"
+fi
 jar="$(mktemp)"
 out="$(mktemp)"
 trap 'rm -f "$jar" "$out"' EXIT
 fa-ci-login "$jar"
-curl -fsS -b "$jar" -o "$out" "$url/fa-ci/grant.php"
+curl -fsS -b "$jar" -o "$out" "$url/fa-ci/grant.php$query"
 grep '^granted ' "$out" || {
     echo "fa-ci-grant: unexpected response from fa-ci/grant.php:" >&2
     head -c 2000 "$out" >&2

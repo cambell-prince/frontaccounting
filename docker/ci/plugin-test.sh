@@ -10,8 +10,8 @@
 #   2. --setup runs in the plugin directory
 #   3. the --with modules (in the order given), then the plugin, are
 #      registered and activated through FrontAccounting's own
-#      Install/Activate Extensions form, and the admin role is granted their
-#      areas. An activation failure fails the run.
+#      Install/Activate Extensions form, and the test user is given a role,
+#      FA CI, holding every area. An activation failure fails the run.
 #   4. the test command runs in the plugin directory
 # Commands run with sh -c as your uid:gid, with group www-data added,
 # umask 002 and HOME=/tmp. The exit status is the test command's.
@@ -21,6 +21,9 @@
 #                          --fa and --php name)
 #   --fa cp|upstream       FrontAccounting flavour (default: cp)
 #   --php 7.4|8.3          PHP version (default: 7.4)
+#   --dataset test|demo    the database the run starts from (default: test,
+#                          the image's fa_test; demo is FrontAccounting's demo
+#                          company, loaded before activation)
 #   --with NAME=REPO@REF   another module the plugin needs, cloned at REF
 #                          (the part after the last @); repeatable
 #   --with NAME=PATH       ... or a local checkout of it, used as it is
@@ -44,6 +47,8 @@ IMAGE="${FA_CI_IMAGE:-}"
 # shellcheck disable=SC2209 # a flavour name, not the cp command
 FLAVOUR=cp
 PHP=7.4
+# shellcheck disable=SC2209 # a dataset name, not the test command
+DATASET=test
 SETUP=''
 ACTIVATE=yes
 NAME=''
@@ -56,6 +61,7 @@ while [ "$#" -gt 0 ]; do
         --image) IMAGE="$2"; shift 2 ;;
         --fa) FLAVOUR="$2"; shift 2 ;;
         --php) PHP="$2"; shift 2 ;;
+        --dataset) DATASET="$2"; shift 2 ;;
         --with) WITH+=("$2"); shift 2 ;;
         --setup) SETUP="$2"; shift 2 ;;
         --no-activate) ACTIVATE=no; shift ;;
@@ -75,6 +81,7 @@ shift
 [ "${1:-}" = -- ] && shift
 TEST="$*"
 [ -n "$TEST" ] || die "no test command"
+case "$DATASET" in test|demo) ;; *) die "--dataset is test or demo, not '$DATASET'" ;; esac
 
 [ -n "$IMAGE" ] || IMAGE="$(fa_ci_image "$FLAVOUR" "$PHP")"
 [ -n "$NAME" ] || NAME="$(module_name "$CHECKOUT")" \
@@ -133,6 +140,10 @@ cleanup() {
 trap cleanup EXIT
 
 ci_boot "$CONTAINER" "$IMAGE" "${run_args[@]}"
+if [ "$DATASET" != test ]; then
+    log "dataset: $DATASET"
+    docker exec "$CONTAINER" fa-ci-dataset "$DATASET"
+fi
 
 # as_user <dir> <command>: sh -c <command> in <dir> as the caller, group www-data added.
 as_user() {

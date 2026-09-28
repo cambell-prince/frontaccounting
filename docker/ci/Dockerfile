@@ -46,16 +46,22 @@ COPY image/php.ini /etc/php/${PHP_VERSION}/apache2/conf.d/zz-fa-ci.ini
 COPY image/php.ini /etc/php/${PHP_VERSION}/cli/conf.d/zz-fa-ci.ini
 COPY image/apache-fa-ci.conf /etc/apache2/conf-available/fa-ci.conf
 RUN a2enmod rewrite && a2enconf fa-ci
+# Files Apache creates (tmp/faillog.php, tmp/errors.log) stay writable by the
+# test uid, which runs with group www-data.
+RUN echo 'umask 002' >> /etc/apache2/envvars
 
 COPY image/fa-mail-catcher /usr/local/bin/fa-mail-catcher
-RUN chmod 0755 /usr/local/bin/fa-mail-catcher && install -d -m 1777 /var/mail-catcher
+RUN chmod 0755 /usr/local/bin/fa-mail-catcher && install -d -m 0777 /var/mail-catcher
 
 COPY image/fa-ci-* /usr/local/lib/fa-ci/
 RUN set -eux; \
     chmod 0755 /usr/local/lib/fa-ci/*; \
     for f in /usr/local/lib/fa-ci/*; do ln -s "$f" /usr/local/bin/; done
 
-# The seeded database.
+# The seeded database. utf8mb4_general_ci by default, for parity with the
+# plugins' old MariaDB 10.11 stacks (11.x otherwise defaults utf8mb4 to
+# utf8mb4_uca1400_ai_ci, which reorders some ORDER BY results tests rely on).
+COPY image/mariadb-fa-ci.cnf /etc/mysql/mariadb.conf.d/60-fa-ci.cnf
 COPY --from=fixture fa_test.sql.gz /usr/local/share/fa-ci/fa_test.sql.gz
 COPY image/seed-db.sh /usr/local/lib/fa-ci-build/seed-db.sh
 RUN sh /usr/local/lib/fa-ci-build/seed-db.sh
@@ -85,6 +91,7 @@ ENV PHP_VERSION=${PHP_VERSION} \
     FA_URL=http://localhost \
     FA_DB_HOST=localhost \
     FA_DB_NAME=fa_test \
+    FA_DB_PREFIX=0_ \
     FA_DB_USER=fa \
     FA_DB_PASSWORD=fa
 

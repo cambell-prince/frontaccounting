@@ -159,6 +159,59 @@ that runs inside the container.
 3. sgw_sales (plan 2): its suite, plus a second job running
    `phpunit-graphql.xml` `--with graphql`. Parity is 66 and 66.
 4. graphql (plan 2): the mail catcher is in the image, its second-company
-   tests use the group-writable tree, and `ANORM_GRAPHQL_PATH` becomes
-   `--mount`. Parity is 966, plus the default-company test.
+   tests use the group-writable tree. anorm-graphql co-development stays in
+   the kept dev stack (`docker/fa-graphql`, `ANORM_GRAPHQL_PATH`); `--mount
+   HOST:/opt/anorm-graphql` is available for a CI-image run if ever needed.
+   Parity is 966, plus the default-company test.
 5. api (plan 2): `--name api --no-activate`.
+
+## §5 Plan 2 additions (2026-09-28)
+
+Moving sgw_sales, graphql and api onto the package
+(`docs/superpowers/plans/2026-09-28-fa-ci-package-plan-2.md`) showed needs the
+three have in common. They go in the package, not in each plugin's scripts.
+
+- **Datasets.**
+  - `plugin-test.sh --dataset test|demo` (default `test`), and the reusable
+    workflow's `dataset` input.
+  - `demo` replaces `fa_test` with FrontAccounting's own `sql/en_US-demo.sql`,
+    adds the `test`/`test` login the package's helpers use (role 2), and appends
+    fiscal years until today is inside one.
+  - The dataset is loaded **before** activation, so each module's `update_*.sql`
+    still runs through FA.
+  - In-image helper: `fa-ci-dataset <test|demo>`.
+- **Grants.**
+  - `fa-ci-grant` gives the `test` user a role of its own, `FA CI`, holding
+    every section and area. It leaves role 2 as the dataset has it, because
+    plugins' own fixtures copy role 2 and assert what it lacks.
+  - `fa-ci-grant --role <id> --module <name>` adds one module's sections and
+    areas to a role. They are worked out in FA's request, as the full grant is.
+- **`fa-ci-ext-id <module>`** prints the extension id FA gave a module. The id
+  depends on activation order, so anything that encodes an extension's area
+  codes has to derive them from it.
+- **Parity with the plugins' old stacks:**
+  - `FA_DB_PREFIX=0_` in the image's environment.
+  - Apache runs with `umask 002`, so files it creates (e.g. `tmp/faillog.php`)
+    stay writable by the test uid's `www-data` group.
+  - `display_errors` off, notices out of `error_reporting`, `memory_limit` 512M.
+  - `/var/mail-catcher` is 0777 without the sticky bit.
+  - The Authorization header is passed through to PHP.
+- **graphql keeps `docker/`** as its development stack, which serves the
+  saygoweb.com-my client's development with dev fixtures, Voyager and the mail
+  listing. Only its CI and test runs move to the package. This follows the
+  design decision that plugins drop their per-repo stacks for testing, and a
+  plugin may keep a dev wrapper. sgw_sales' and api's stacks only ever ran
+  tests, so they are deleted as §4 says.
+- **Parity targets** (tests run / skipped):
+
+  | suite | cp | upstream |
+  | --- | --- | --- |
+  | graphql `phpunit.xml` | 966 / 1 | 966 / 2 |
+  | sgw_sales' GraphQL suite, from graphql | 66 / 0 | 66 / 0 |
+  | graphql default-company | 1 / 0 | 1 / 0 |
+  | sgw_sales `phpunit.xml` | 66 / 1 | — |
+  | sgw_sales `phpunit-graphql.xml` | 66 / 0 | 66 / 0 |
+  | api | 31 / 0 | 31 / 0 |
+
+  The extra upstream skip in graphql is `CompatDriftTest`, which needs a fork
+  file. api was only proven on upstream before; `cp` is added.
