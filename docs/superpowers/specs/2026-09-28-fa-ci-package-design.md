@@ -159,8 +159,10 @@ that runs inside the container.
 3. sgw_sales (plan 2): its suite, plus a second job running
    `phpunit-graphql.xml` `--with graphql`. Parity is 66 and 66.
 4. graphql (plan 2): the mail catcher is in the image, its second-company
-   tests use the group-writable tree, and `ANORM_GRAPHQL_PATH` becomes
-   `--mount`. Parity is 966, plus the default-company test.
+   tests use the group-writable tree. anorm-graphql co-development stays in
+   the kept dev stack (`docker/fa-graphql`, `ANORM_GRAPHQL_PATH`); `--mount
+   HOST:/opt/anorm-graphql` is available for a CI-image run if ever needed.
+   Parity is 966, plus the default-company test.
 5. api (plan 2): `--name api --no-activate`.
 
 ## §5 Plan 2 additions (2026-09-28)
@@ -196,9 +198,10 @@ three have in common. They go in the package, not in each plugin's scripts.
   - The Authorization header is passed through to PHP.
 - **graphql keeps `docker/`** as its development stack, which serves the
   saygoweb.com-my client's development with dev fixtures, Voyager and the mail
-  listing. Only its CI and test runs move to the package. This uses §4's "a
-  plugin may keep a thin dev wrapper". sgw_sales' and api's stacks only ever
-  ran tests, so they are deleted as §4 says.
+  listing. Only its CI and test runs move to the package. This follows the
+  design decision that plugins drop their per-repo stacks for testing, and a
+  plugin may keep a dev wrapper. sgw_sales' and api's stacks only ever ran
+  tests, so they are deleted as §4 says.
 - **Parity targets** (tests run / skipped):
 
   | suite | cp | upstream |
