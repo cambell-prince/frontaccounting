@@ -1,0 +1,128 @@
+name: Plugin test
+
+# Reusable workflow: run a FrontAccounting plugin's tests in the CI image
+# (docker/ci), exactly as docker/ci/plugin-test.sh does locally. A plugin's
+# workflow calls it:
+#
+#   jobs:
+#     test:
+#       strategy:
+#         matrix: {fa: [cp, upstream], php: ['7.4', '8.3']}
+#       uses: cambell-prince/frontaccounting/.github/workflows/plugin-test.yml@master-cp
+#       with:
+#         fa: ${{ matrix.fa }}
+#         php: ${{ matrix.php }}
+#         setup: composer install --no-interaction --no-progress
+#         test: sh tools/ci.sh
+
+on:
+  workflow_call:
+    inputs:
+      test:
+        description: Test command, run with sh -c in the plugin's directory in the container
+        type: string
+        required: true
+      setup:
+        description: Command run before the plugin is activated (e.g. composer install)
+        type: string
+        default: ''
+      with:
+        description: Other modules to activate first, one NAME=REPO@REF per line
+        type: string
+        default: ''
+      fa:
+        description: FrontAccounting flavour, cp (cambell-prince/frontaccounting master-cp) or upstream
+        type: string
+        default: cp
+      php:
+        description: PHP version, 7.4 or 8.3
+        type: string
+        default: '7.4'
+      image:
+        description: The CI image to boot, overriding fa and php (e.g. a pinned -<sha> tag)
+        type: string
+        default: ''
+      fa-ref:
+        description: The cambell-prince/frontaccounting ref whose docker/ci scripts drive the run
+        type: string
+        default: master-cp
+      activate:
+        description: Register and activate the plugin through FrontAccounting before testing
+        type: boolean
+        default: true
+      name:
+        description: The module name, for a checkout without hooks.php
+        type: string
+        default: ''
+    secrets:
+      clone-token:
+        description: Token for cloning private repositories named in `with`
+        required: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  test:
+    name: FA ${{ inputs.fa }} / PHP ${{ inputs.php }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: plugin
+      - uses: actions/checkout@v7
+        with:
+          repository: cambell-prince/frontaccounting
+          ref: ${{ inputs.fa-ref }}
+          path: fa-ci
+          sparse-checkout: docker/ci
+      - name: Composer cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/composer-cache
+          key: composer-${{ inputs.php }}-${{ hashFiles('plugin/composer.lock', 'plugin/composer.json') }}
+          restore-keys: composer-${{ inputs.php }}-
+      - name: Git access for `with`
+        env:
+          CLONE_TOKEN: ${{ secrets.clone-token }}
+        run: |
+          # SSH-style URLs work here too: there is no SSH key, so use https.
+          # insteadOf rewrites don't chain, so with a token both prefixes map
+          # straight to the token URL; without one, git@ still maps to https.
+          if [ -n "$CLONE_TOKEN" ]; then
+              git config --global url."https://x-access-token:${CLONE_TOKEN}@github.com/".insteadOf "https://github.com/"
+              git config --global --add url."https://x-access-token:${CLONE_TOKEN}@github.com/".insteadOf "git@github.com:"
+          else
+              git config --global url."https://github.com/".insteadOf "git@github.com:"
+          fi
+      - name: Pull the CI image
+        env:
+          FA_CI_IMAGE: ${{ inputs.image }}
+          FA: ${{ inputs.fa }}
+          PHP: ${{ inputs.php }}
+        run: |
+          image="${FA_CI_IMAGE:-ghcr.io/cambell-prince/frontaccounting-ci:$FA-php$PHP}"
+          docker pull "$image"
+      - name: Test
+        env:
+          COMPOSER_CACHE_DIR: ${{ runner.temp }}/composer-cache
+          FA_CI_IMAGE: ${{ inputs.image }}
+          FA: ${{ inputs.fa }}
+          PHP: ${{ inputs.php }}
+          SETUP: ${{ inputs.setup }}
+          WITH: ${{ inputs.with }}
+          ACTIVATE: ${{ inputs.activate }}
+          NAME: ${{ inputs.name }}
+          TEST: ${{ inputs.test }}
+        run: |
+          args=(--fa "$FA" --php "$PHP")
+          [ -n "$SETUP" ] && args+=(--setup "$SETUP")
+          [ -n "$NAME" ] && args+=(--name "$NAME")
+          [ "$ACTIVATE" = true ] || args+=(--no-activate)
+          while IFS= read -r line; do
+              line="${line#"${line%%[![:space:]]*}"}"
+              [ -n "$line" ] && args+=(--with "$line")
+          done <<< "$WITH"
+          fa-ci/docker/ci/plugin-test.sh "${args[@]}" plugin -- "$TEST"

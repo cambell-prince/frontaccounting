@@ -1,0 +1,2 @@
+Test fixture for docker/ci: a checkout with no hooks.php, like the api module,
+which needs --name.

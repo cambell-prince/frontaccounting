@@ -1,0 +1,10 @@
+#!/bin/sh
+# PHP's sendmail_path in the CI image: each message mail() sends is kept whole
+# as /var/mail-catcher/<stamp>.eml instead of being delivered. PHP's -t -i style
+# arguments are ignored.
+set -eu
+umask 000
+dir=/var/mail-catcher
+name="$(date +%Y%m%d%H%M%S)-$$-$(od -An -N4 -tx4 /dev/urandom | tr -d ' \n')"
+cat > "$dir/.$name.tmp"
+mv "$dir/.$name.tmp" "$dir/$name.eml"

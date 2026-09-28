@@ -1,0 +1,17 @@
+#!/bin/sh
+# fa-ci-grant: give the System Administrator role (id 2), which the test user
+# holds, every security section and area FrontAccounting knows, extension ones
+# included, through /fa-ci/grant.php. Run it after activating modules, so their
+# pages are open to the tests.
+set -eu
+url="${FA_URL:-http://localhost}"
+jar="$(mktemp)"
+out="$(mktemp)"
+trap 'rm -f "$jar" "$out"' EXIT
+fa-ci-login "$jar"
+curl -fsS -b "$jar" -o "$out" "$url/fa-ci/grant.php"
+grep '^granted ' "$out" || {
+    echo "fa-ci-grant: unexpected response from fa-ci/grant.php:" >&2
+    head -c 2000 "$out" >&2
+    exit 1
+}

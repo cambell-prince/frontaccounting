@@ -24,3 +24,4 @@ makefile.json export-ignore
 deploy export-ignore
 docker export-ignore
 upload-exclude.txt export-ignore
+docs export-ignore

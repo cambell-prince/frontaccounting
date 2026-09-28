@@ -1,0 +1,144 @@
+name: CI image
+
+# Builds, smoke-tests and publishes ghcr.io/cambell-prince/frontaccounting-ci,
+# the images plugins test against through .github/workflows/plugin-test.yml,
+# then prunes versions nothing needs. See docker/ci/README.md.
+
+on:
+  push:
+    branches:
+      - master-cp
+    paths: &image-paths
+      - '*.php'
+      - access/**
+      - admin/**
+      - applications/**
+      - dimensions/**
+      - fixed_assets/**
+      - gl/**
+      - includes/**
+      - inventory/**
+      - js/**
+      - lang/**
+      - manufacturing/**
+      - modules/tests/data/**
+      - purchasing/**
+      - reporting/**
+      - sales/**
+      - sql/**
+      - taxes/**
+      - themes/**
+      - docker/ci/**
+      - .github/workflows/ci-image.yml
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    paths: *image-paths
+  schedule:
+    # Weekly, for Debian and sury updates and upstream FrontAccounting's master.
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Only report what the prune would delete
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: read
+
+concurrency:
+  group: ci-image-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/cambell-prince/frontaccounting-ci
+
+jobs:
+  build:
+    # Pull requests from forks cannot push to this repository's package.
+    if: >-
+      github.event_name != 'pull_request'
+      || (github.event.pull_request.head.repo.full_name == github.repository
+          && github.event.action != 'closed')
+    name: ${{ matrix.fa }} / PHP ${{ matrix.php }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        fa: [cp, upstream]
+        php: ['7.4', '8.3']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      # Exposes the cache service's URL and token to build-image.sh's
+      # `--cache-to type=gha`, which a plain run step does not otherwise see.
+      - uses: crazy-max/ghaction-github-runtime@v4
+      - name: Choose tags
+        id: tags
+        run: |
+          flavour="${{ matrix.fa }}-php${{ matrix.php }}"
+          if [ "${{ github.event_name }}" = pull_request ]; then
+              echo "tags=$IMAGE:pr-${{ github.event.pull_request.number }}-$flavour" >> "$GITHUB_OUTPUT"
+          else
+              echo "tags=$IMAGE:$flavour $IMAGE:$flavour-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build
+        run: docker/ci/build-image.sh --cache-gha ${{ matrix.fa }} ${{ matrix.php }} ${{ steps.tags.outputs.tags }}
+        env:
+          FA_CI_REF_NAME: ${{ github.head_ref || github.ref_name }}
+      - name: Smoke test
+        run: |
+          set -- ${{ steps.tags.outputs.tags }}
+          docker/ci/smoke-test.sh "$1"
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push
+        run: |
+          for tag in ${{ steps.tags.outputs.tags }}; do
+              if echo "$tag" | grep -qE -- '-[0-9a-f]{7}$' \
+                  && docker buildx imagetools inspect "$tag" >/dev/null 2>&1; then
+                  echo "keeping existing $tag (pinned tags are immutable)"
+                  continue
+              fi
+              docker push "$tag"
+          done
+
+  prune:
+    needs: build
+    if: ${{ !cancelled() && needs.build.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: docker/ci
+      - name: Prune old images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRY_RUN: ${{ github.event_name == 'pull_request' || inputs.dry-run == true }}
+        run: |
+          args=()
+          [ "$DRY_RUN" = true ] && args+=(--dry-run)
+          docker/ci/prune-images.sh "${args[@]}"
+
+  drop-pr-image:
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.action == 'closed'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: docker/ci
+      - name: Delete this pull request's images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: docker/ci/prune-images.sh --pr ${{ github.event.pull_request.number }}

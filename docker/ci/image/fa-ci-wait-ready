@@ -1,0 +1,12 @@
+#!/bin/sh
+# fa-ci-wait-ready [seconds]: wait until MariaDB answers and FrontAccounting
+# serves its login page (default: 120 seconds).
+set -eu
+limit="${1:-120}"
+waited=0
+until mariadb-admin --silent ping >/dev/null 2>&1 \
+    && curl -fsS -o /dev/null "${FA_URL:-http://localhost}/index.php"; do
+    waited=$((waited + 1))
+    [ "$waited" -lt "$limit" ] || { echo "fa-ci-wait-ready: not ready after ${limit}s" >&2; exit 1; }
+    sleep 1
+done

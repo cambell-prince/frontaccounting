@@ -1,0 +1,65 @@
+#!/usr/bin/env php
+<?php
+/*
+	fa-ci-register <name> <path>
+
+	Add a module to FrontAccounting's extension lists, inactive, as Setup ->
+	Install/Activate Extensions does (write_extensions() in
+	admin/db/maintenance_db.inc): the global installed_extensions.php, with
+	$next_extension_id moved on, and company 0's copy. <path> is relative to the
+	FA root, e.g. modules/graphql. Run it as www-data, which owns those files.
+*/
+if ($argc !== 3) {
+	fwrite(STDERR, "usage: fa-ci-register <name> <path relative to the FA root>\n");
+	exit(2);
+}
+list(, $name, $path) = $argv;
+$root = getenv('FA_ROOT') ?: '/var/www/html';
+
+function load_extensions($file)
+{
+	$installed_extensions = array();
+	$next_extension_id = null;
+	if (is_file($file))
+		include $file;
+	return array($installed_extensions, $next_extension_id);
+}
+
+function save_extensions($file, $extensions, $next = null)
+{
+	$php = "<?php\n\n";
+	if ($next !== null)
+		$php .= "\$next_extension_id = $next; // unique id for next installed extension\n\n";
+	$php .= '$installed_extensions = ' . var_export($extensions, true) . ";\n";
+	if (file_put_contents($file, $php) === false) {
+		fwrite(STDERR, "fa-ci-register: cannot write $file\n");
+		exit(1);
+	}
+}
+
+list($global, $next) = load_extensions("$root/installed_extensions.php");
+foreach ($global as $id => $ext) {
+	if ($ext['package'] === $name) {
+		echo "$name is already registered as extension $id\n";
+		exit(0);
+	}
+}
+
+$id = $next ?: (count($global) ? max(array_keys($global)) + 1 : 1);
+$entry = array(
+	'package' => $name,
+	'name' => $name,
+	'version' => '-',
+	'available' => '',
+	'type' => 'extension',
+	'path' => $path,
+	'active' => false,
+);
+$global[$id] = $entry;
+save_extensions("$root/installed_extensions.php", $global, $id + 1);
+
+list($company) = load_extensions("$root/company/0/installed_extensions.php");
+$company[$id] = $entry;
+save_extensions("$root/company/0/installed_extensions.php", $company);
+
+echo "registered $name as extension $id\n";
