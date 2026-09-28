@@ -87,6 +87,8 @@ jobs:
           fi
       - name: Build
         run: docker/ci/build-image.sh --cache-gha ${{ matrix.fa }} ${{ matrix.php }} ${{ steps.tags.outputs.tags }}
+        env:
+          FA_CI_REF_NAME: ${{ github.head_ref || github.ref_name }}
       - name: Smoke test
         run: |
           set -- ${{ steps.tags.outputs.tags }}
