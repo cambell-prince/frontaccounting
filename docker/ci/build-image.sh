@@ -13,6 +13,9 @@
 #
 # The database is always seeded from this checkout's
 # modules/tests/data/fa_test.sql.gz.
+#
+# FA_CI_REF_NAME, for the cp flavour: the ref name recorded in the image's
+# io.frontaccounting.ref label; CI passes it, since its checkout is detached.
 
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,7 +37,7 @@ mkdir -p "$stage/fa" "$stage/fixture"
 case "$flavour" in
     cp)
         git -C "$root" archive HEAD | tar -x -C "$stage/fa"
-        fa_ref="$(git -C "$root" rev-parse --abbrev-ref HEAD)"
+        fa_ref="${FA_CI_REF_NAME:-$(git -C "$root" symbolic-ref -q --short HEAD || git -C "$root" rev-parse --short HEAD)}"
         fa_sha="$(git -C "$root" rev-parse HEAD)"
         ;;
     upstream)
@@ -57,7 +60,8 @@ if [ "$gha" = yes ]; then
 fi
 
 log "building FrontAccounting $flavour ($fa_ref ${fa_sha:0:7}) on PHP $php: $*"
-docker buildx build --load "${cache[@]}" \
+docker buildx build --load "${cache[@]+"${cache[@]}"}" \
+    --provenance=false --sbom=false \
     --build-arg PHP_VERSION="$php" \
     --build-context fa="$stage/fa" \
     --build-context fixture="$stage/fixture" \
@@ -66,4 +70,4 @@ docker buildx build --load "${cache[@]}" \
     --label org.opencontainers.image.description="FrontAccounting ($flavour, PHP $php) for plugin CI" \
     --label io.frontaccounting.ref="$fa_ref" \
     --label io.frontaccounting.commit="$fa_sha" \
-    -f "$here/Dockerfile" "${tags[@]}" "$here"
+    -f "$here/Dockerfile" "${tags[@]+"${tags[@]}"}" "$here"

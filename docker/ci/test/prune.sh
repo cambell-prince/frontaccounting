@@ -32,4 +32,18 @@ expect_contains "and says so" "nothing to delete" "$OUT"
 expect_status 1 "--keep needs a number" "$p" --keep x
 expect_status 1 "--pr needs a number" "$p" --pr x
 expect_status 1 "unknown arguments are refused" "$p" --bogus
+
+stubdir="$(mktemp -d)"
+trap 'rm -rf "$stubdir"' EXIT
+cat > "$stubdir/gh" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$stubdir/gh"
+expect_status 1 "a failing open-PR lookup aborts, deleting nothing" \
+    env PATH="$stubdir:$PATH" PRUNE_VERSIONS_FILE="$f" "$p" --dry-run
+expect_absent "no 'would delete' when the open-PR lookup fails" "would delete" "$OUT"
+rm -rf "$stubdir"
+trap - EXIT
+
 finish

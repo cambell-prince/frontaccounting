@@ -83,6 +83,7 @@ TEST="$*"
 FA=/var/www/html
 CONTAINER="fa-ci-$NAME-$$"
 WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
 
 run_args=(-v "$CHECKOUT:$FA/modules/$NAME")
 deps=()

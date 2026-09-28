@@ -94,7 +94,9 @@ plugin-test.sh [--image IMG | --fa cp|upstream --php 7.4|8.3]
   `HOME=/tmp`.
 - **Order of a run:**
   1. boot and `fa-ci-wait-ready`;
-  2. `composer install --no-dev` in each `--with` that has a composer.json;
+  2. `composer install --no-dev` in each cloned `--with` that has a
+     composer.json (a local `--with NAME=PATH` is used as it is, so a
+     developer's checkout keeps its dev dependencies);
   3. `--setup` in the plugin directory;
   4. activation, the `--with` modules first in the order given, then the
      plugin: `fa-ci-register`, then `fa-ci-activate`, then `fa-ci-grant`;
@@ -135,7 +137,7 @@ plugin-test.sh [--image IMG | --fa cp|upstream --php 7.4|8.3]
   - The caller owns the matrix.
 - **Pruning (`docker/ci/prune-images.sh`):**
   - Keep every version with a tag it doesn't recognise (the moving tags).
-  - Per flavour, keep the newest 3 `-<sha7>` tags.
+  - Per image series (`<flavour>-php<ver>`), keep the newest 3 `-<sha7>` tags.
   - Delete untagged versions, and `pr-<n>-*` whose PR is closed.
   - `--pr <n>` deletes one PR's images.
   - It's a dry run on pull requests. The package belongs to the user

@@ -83,13 +83,18 @@ if [ -n "$PR" ]; then
                        and any(.tags[]; pr_number == $pr))
               | {id, tags, why: "its pull request has closed"} ]')"
 else
-    doomed="$(versions | jq --argjson keep "$KEEP" --argjson open "$(open_prs)" "$JQ_TAGS"'
+    open="$(open_prs)"
+    jq -e 'type == "array"' <<< "$open" >/dev/null || die "open PR lookup returned no JSON array"
+    doomed="$(versions | jq --argjson keep "$KEEP" --argjson open "$open" "$JQ_TAGS"'
         (map(select((.tags | length) > 0 and (protected | not) and any(.tags[]; sha_tag)))
          | group_by(flavour)
          | map(sort_by(.created_at) | reverse | .[$keep:])
          | add // []
          | map(.id)) as $old
         | [ .[]
+            # untagged versions are safe to prune only because build-image.sh
+            # builds single-manifest images (no provenance/SBOM index) -- see
+            # its --provenance=false --sbom=false.
             | if (.tags | length) == 0 then
                   {id, tags, why: "untagged"}
               elif protected then
