@@ -75,6 +75,21 @@ expect_status 0 "previous with none recorded" up previous "$rel" u h "$srv/" ""
 expect_contains "says so" "no previous deploy" "$OUT"
 expect_status 0 "and leaves an empty file" test -f "$rel.previous" -a ! -s "$rel.previous"
 
+expect_status 1 "previous with a missing remote directory fails" up previous "$rel" u h "$work/nodir/" ""
+expect_absent "and does not call it 'none recorded'" "no previous deploy" "$OUT"
+expect_status 0 "previous creates the local directory" up previous "$work/new/sub/release" u h "$srv/" ""
+expect_status 0 "and writes there" test -f "$work/new/sub/release.previous"
+
+# a stale directory counts as its files, not as itself
+mkdir "$srv/staledir"
+echo 1 > "$srv/staledir/a"
+echo 2 > "$srv/staledir/b"
+expect_status 0 "check with a stale directory" up check "$rel" u h "$srv/" "" 4
+expect_contains "counts files, not the directory" "4 to delete" "$OUT"
+expect_contains "the list still names the directory" "staledir/" "$(cat "$rel.deletes")"
+expect_status 3 "the limit counts files" up check "$rel" u h "$srv/" "" 3
+rm -r "$srv/staledir"
+
 expect_status 0 "check" up check "$rel" u h "$srv/" ""
 expect_contains "counts the deletes" "2 to delete" "$OUT"
 deletes="$(cat "$rel.deletes")"

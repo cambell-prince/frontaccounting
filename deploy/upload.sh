@@ -15,7 +15,8 @@
 #           if more than <max_deletes> would go; no limit when it is empty.
 # go        the upload itself; needs <confirm> = yes
 # previous  fetches the server's .deploy-manifest, the record of the last
-#           deploy, to <dir>.previous; an empty file when there is none
+#           deploy, to <dir>.previous; an empty file when the server says that
+#           file is missing (any other error, such as a wrong path, fails)
 #
 # --delete makes the server match the release, except for:
 #   - anything upload-exclude.txt names, which is neither sent nor deleted
@@ -45,10 +46,11 @@ rsh="${UPLOAD_RSH:-ssh}"
 
 if [ "$mode" = previous ]; then
     out="$dir.previous"
+    mkdir -p "$(dirname "$out")"
     rm -f "$out" "$out.err"
     if rsync -t --rsync-path="$rsync_path" --rsh="$rsh" "${dest}.deploy-manifest" "$out" 2> "$out.err"; then
         echo "==> previous deploy: $(head -2 "$out" | tail -1)"
-    elif grep -q 'No such file' "$out.err"; then
+    elif grep -q '\.deploy-manifest".*No such file' "$out.err"; then
         : > "$out"
         echo "==> no previous deploy recorded on $dest"
     else
@@ -74,7 +76,8 @@ case "$mode" in
         out="$dir.check"
         rsync "$@" --dry-run --itemize-changes "$dir/" "$dest" > "$out"
         sed -n 's/^\*deleting *//p' "$out" > "$dir.deletes"
-        deletes="$(wc -l < "$dir.deletes" | tr -d ' ')"
+        # files only: rsync also lists each directory it would remove, as dir/
+        deletes="$(grep -vc '/$' "$dir.deletes" || true)"
         echo "==> dry run against $dest: $(grep -c '^[<>]f' "$out" || true) file(s) to send, $deletes to delete"
         if [ "$deletes" -gt 0 ]; then
             echo "==> the server would lose these:"
