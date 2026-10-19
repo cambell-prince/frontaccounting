@@ -17,11 +17,15 @@
 #                         that have security advisories against them. For an old
 #                         component whose lock composer 2 cannot install from and
 #                         whose dependencies it now refuses; the manifest says so.
+#               A ref of 40 hex digits is a commit (deploy/resolve-refs.sh
+#               pins them) and is fetched as exactly that commit.
 # <php>         PHP version composer resolves for (config.platform.php): the
 #               server's, not this machine's
 #
 # On success writes <dir>.ok, which deploy/upload.sh requires, and
-# <dir>.manifest, recording what went into the release. make.phar carries on
+# <dir>.manifest, recording what went into the release by full commit. A copy
+# of the manifest goes into the release as .deploy-manifest, so the server
+# keeps a record of what it runs. make.phar carries on
 # past a failed command, so the marker is what stops a half-built tree from
 # being uploaded.
 set -eu
@@ -38,11 +42,13 @@ rm -rf "$dir"
 mkdir -p "$dir"
 dir="$(cd "$dir" && pwd)"    # absolute, for docker's bind mount
 
+is_sha() { [ "${#1}" -eq 40 ] && case "$1" in *[!0-9a-f]*) false ;; *) true ;; esac; }
+
 sha="$(git rev-parse --verify "$ref^{commit}")"
 git archive "$sha" | tar -x -C "$dir"
 {
     echo "built $(date -u +%Y-%m-%dT%H:%M:%SZ) on $(hostname)"
-    echo "frontaccounting $ref $(git log -1 --format='%h %s' "$sha")"
+    echo "frontaccounting $ref $(git log -1 --format='%H %s' "$sha")"
 } > "$dir.manifest"
 
 for component in $components; do
@@ -62,8 +68,14 @@ for component in $components; do
 
     echo "==> $path: $repo @ $cref"
     rm -rf "${dir:?}/$path"
-    git clone --quiet --depth 1 --branch "$cref" "$repo" "$dir/$path"
-    echo "$path $cref $(git -C "$dir/$path" log -1 --format='%h %s')" >> "$dir.manifest"
+    if is_sha "$cref"; then
+        git init --quiet "$dir/$path"
+        git -C "$dir/$path" fetch --quiet --depth 1 "$repo" "$cref"
+        git -C "$dir/$path" -c advice.detachedHead=false checkout --quiet FETCH_HEAD
+    else
+        git clone --quiet --depth 1 --branch "$cref" "$repo" "$dir/$path"
+    fi
+    echo "$path $cref $(git -C "$dir/$path" log -1 --format='%H %s')" >> "$dir.manifest"
     rm -rf "$dir/$path/.git"
 
     if [ -f "$dir/$path/composer.json" ]; then
@@ -86,6 +98,7 @@ for component in $components; do
     fi
 done
 
+cp "$dir.manifest" "$dir/.deploy-manifest"
 touch "$dir.ok"
 echo "==> release built in $dir"
 cat "$dir.manifest"
