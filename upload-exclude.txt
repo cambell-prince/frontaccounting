@@ -59,6 +59,7 @@ upload-exclude*.txt
 /modules/*/log/
 /modules/*/tmp/
 /modules/graphql/config_graphql.php
+/modules/mcp/config_mcp.php
 /modules/sgw_import/uploads/
 /modules/api
 /modules/import_paypal

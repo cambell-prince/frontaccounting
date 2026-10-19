@@ -12,15 +12,17 @@ Other targets:
 | target | what it does |
 | --- | --- |
 | `package` | `build/frontaccounting-<version>.tgz` of the built release, for a fresh install (it keeps `install/`, `sql/` and the `company/` and `tmp/` skeletons that deploy leaves out) |
+| `deploy-previous` | fetch the server's `.deploy-manifest`, the record of the last deploy, to `build/release.previous` |
 | `db-backup` | dump the server's database to `backup/<db>-<stamp>.sql.gz` over ssh |
 | `db-load file=...` | load a dump into the docker test stack (`docker/fa db reset`) |
 | `test` | the PHPUnit suite in the docker stack (`docker/fa test`) |
 | `clean` | remove `build/` and make.phar's `log/` |
 
 Every variable in `makefile.json` can be overridden on the command line, for
-example `make.phar release ref=v2.4.20` or `make.phar deploy-check dest=...`. A
-site's own branch sets its values in `makefile.json`: `dest`, `remote_user`,
-`components`, `db_ssh` and `db`.
+example `make.phar release ref=v2.4.20` or `make.phar deploy-check user=me`. A
+site's own branch sets its values in `makefile.json`: `user`, `host` and `path`
+(the destination is `user@host:path`, and `path` ends with `/`),
+`remote_user`, `components`, `db_ssh` and `db`.
 
 ## What a release is
 
@@ -61,9 +63,14 @@ with three exceptions:
   installed on the server survive a deploy that doesn't carry them. Stale
   files inside the ones it does carry are still removed.
 - `deploy` needs `confirm=yes`.
+- `deploy-check max_deletes=<n>` fails if more than `n` files would be
+  deleted. The GitHub deploy uses 25.
 
 `deploy-check` prints every file the server would lose and writes the full
 itemised list to `build/release.check`. Read it before `deploy`.
+
+Every release carries its manifest as `.deploy-manifest`, so the server's copy
+names the commits it is running.
 
 `install/` and `sql/` are never uploaded. If the server has an `install/`
 directory from the original installation, delete it by hand.
