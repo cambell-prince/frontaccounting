@@ -52,8 +52,8 @@ f2="$(git -C "$fa" rev-parse HEAD)"
 
 # sha40 <char>: a made-up 40-character commit id
 sha40() { local s; s="$(printf '%040d' 0)"; printf '%s\n' "${s//0/$1}"; }
-x1="$(sha40 1)"; x2="$(sha40 2)"; y1="$(sha40 3)"; z2="$(sha40 4)"; n1="$(sha40 5)"; w1="$(sha40 6)"; w2="$(sha40 7)"; r1="$(sha40 8)"; r2="$(sha40 9)"; q1="$(sha40 b)"; q2="$(sha40 c)"
-comps="modules/x|https://github.com/o/x.git|main modules/y|https://github.com/o/y.git|main modules/z|https://github.com/o/z.git|main modules/n|https://github.com/o/n.git|main modules/w|git@github.com:o/w.git|main modules/r|https://github.com/o/r.git|main modules/q|https://github.com/o/q.git|main"
+x1="$(sha40 1)"; x2="$(sha40 2)"; y1="$(sha40 3)"; z2="$(sha40 4)"; n1="$(sha40 5)"; w1="$(sha40 6)"; w2="$(sha40 7)"; r1="$(sha40 8)"; r2="$(sha40 9)"; q1="$(sha40 b)"; q2="$(sha40 c)"; d1="$(sha40 d)"; d2="$(sha40 e)"
+comps="modules/x|https://github.com/o/x.git|main modules/y|https://github.com/o/y.git|main modules/z|https://github.com/o/z.git|main modules/n|https://github.com/o/n.git|main modules/w|git@github.com:o/w.git|main modules/r|https://github.com/o/r.git|main modules/q|https://github.com/o/q.git|main modules/d|https://github.com/o/d.git|main"
 cat > "$work/prev" <<EOF
 built 2026-10-20T00:00:00Z on test
 frontaccounting master-ark $f1 one
@@ -64,6 +64,7 @@ modules/z main abc1234 z, from an older build
 modules/w main $w1 w
 modules/r main $r1 r
 modules/q main $q1 q
+modules/d main $d1 d
 EOF
 cat > "$work/new" <<EOF
 built 2026-10-21T00:00:00Z on test
@@ -75,10 +76,12 @@ modules/n $n1 $n1 n
 modules/w $w2 $w2 w
 modules/r $r2 $r2 r
 modules/q $q2 $q2 q
+modules/d $d2 $d2 d
 EOF
 cat > "$work/compare" <<EOF
 o/x $x1...$x2 ahead sql/update_2.sql
 o/x $x1...$x2 ahead README.md
+o/d $d1...$d2 diverged sql/update_4.sql
 o/r $r1...$r2 behind
 o/r $r2...$r1 ahead sql/update_3.sql
 o/r $r2...$r1 ahead README.md
@@ -97,6 +100,8 @@ expect_contains "a new component is pointed out" "modules/n: new in this deploy"
 expect_contains "a failed comparison is reported" "modules/w: cannot compare ${w1:0:7}..${w2:0:7} on GitHub" "$OUT"
 expect_contains "a rollback is said to be one" "modules/r: rolled back from ${r1:0:7} to ${r2:0:7}" "$OUT"
 expect_contains "and lists what the rolled-back range changed in sql/" "modules/r: sql/update_3.sql" "$OUT"
+expect_contains "a diverged history is flagged" "modules/d: history diverged between ${d1:0:7} and ${d2:0:7}; check its sql/ by hand" "$OUT"
+expect_contains "and still lists the sql/ the compare returned" "modules/d: sql/update_4.sql" "$OUT"
 expect_contains "300 files is a truncated compare" "modules/q: cannot fully compare ${q1:0:7}..${q2:0:7} (300 or more files changed); check its sql/ by hand" "$OUT"
 
 : > "$work/empty"

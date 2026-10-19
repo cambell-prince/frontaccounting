@@ -76,10 +76,11 @@ case "$mode" in
         out="$dir.check"
         rsync "$@" --dry-run --itemize-changes "$dir/" "$dest" > "$out"
         sed -n 's/^\*deleting *//p' "$out" > "$dir.deletes"
-        # files only: rsync also lists each directory it would remove, as dir/
+        # rsync lists each directory it would remove as dir/; count them apart
         deletes="$(grep -vc '/$' "$dir.deletes" || true)"
-        echo "==> dry run against $dest: $(grep -c '^[<>]f' "$out" || true) file(s) to send, $deletes to delete"
-        if [ "$deletes" -gt 0 ]; then
+        dirs="$(grep -c '/$' "$dir.deletes" || true)"
+        echo "==> dry run against $dest: $(grep -c '^[<>]f' "$out" || true) file(s) to send, $deletes file(s) and $dirs director(ies) to delete"
+        if [ "$deletes" -gt 0 ] || [ "$dirs" -gt 0 ]; then
             echo "==> the server would lose these:"
             sed 's/^/    /' "$dir.deletes"
         else

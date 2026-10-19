@@ -64,6 +64,7 @@ image_paths() {
     [ -f "$image_workflow" ] || die "no $image_workflow in $(pwd)"
     awk '/paths: &image-paths/ { on = 1; next }
          on && /^[[:space:]]*- / { sub(/^[[:space:]]*- /, ""); print; next }
+         on && /^[[:space:]]*(#.*)?$/ { next }
          on { exit }' "$image_workflow" | tr -d "'\""
 }
 

@@ -90,6 +90,23 @@ expect_status 0 "a head that renames a file out of an image path" resolve master
 expect_contains "takes the last green commit" "ref=$c1" "$OUT"
 git -C "$fa" checkout -q "$c3"
 
+# a comment or a blank line inside the image-paths list must not cut it short:
+# reporting/** comes after both, and the head changes only reporting/
+git -C "$fa" checkout -q -b commented "$c3"
+sed -i "0,/^      - '\\*.php'\$/s//      - '*.php'\\n\\n      # a note in the list\\n/" "$fa/.github/workflows/ci-image.yml"
+git -C "$fa" commit -qam "comment in the list"
+g1="$(git -C "$fa" rev-parse HEAD)"
+echo more > "$fa/reporting/more.txt"
+git -C "$fa" add reporting
+git -C "$fa" commit -qm "report again"
+sed "s/ master-ark $c1/ master-ark $g1/" "$runs" > "$runs.commented"
+expect_contains "the test list has a comment" "# a note in the list" "$(cat "$fa/.github/workflows/ci-image.yml")"
+OLD_RUNS="$runs"; runs="$runs.commented"
+expect_status 0 "a head that changes a glob after a comment and a blank line" resolve master-ark "$comps"
+expect_contains "takes the last green commit" "ref=$g1" "$OUT"
+runs="$OLD_RUNS"
+git -C "$fa" checkout -q "$c3"
+
 git -C "$fa" checkout -q "$c1"
 expect_status 0 "a green head" resolve master-ark "$comps"
 expect_contains "takes it" "ref=$c1" "$OUT"

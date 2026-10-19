@@ -85,13 +85,23 @@ mkdir "$srv/staledir"
 echo 1 > "$srv/staledir/a"
 echo 2 > "$srv/staledir/b"
 expect_status 0 "check with a stale directory" up check "$rel" u h "$srv/" "" 4
-expect_contains "counts files, not the directory" "4 to delete" "$OUT"
+expect_contains "counts files, not the directory" "4 file(s) and 1 director(ies) to delete" "$OUT"
 expect_contains "the list still names the directory" "staledir/" "$(cat "$rel.deletes")"
 expect_status 3 "the limit counts files" up check "$rel" u h "$srv/" "" 3
 rm -r "$srv/staledir"
 
+# only an empty directory to delete: say so, not "nothing"
+mkdir "$srv/emptydir"
+rm -f "$srv/stale.php" "$srv/modules/ext/old.php"
+expect_status 0 "check with only a stale directory" up check "$rel" u h "$srv/" "" 0
+expect_contains "counts it" "0 file(s) and 1 director(ies) to delete" "$OUT"
+expect_absent "and does not say nothing would go" "nothing on the server would be deleted" "$OUT"
+rmdir "$srv/emptydir"
+echo stale > "$srv/stale.php"
+mkdir -p "$srv/modules/ext"; echo old > "$srv/modules/ext/old.php"
+
 expect_status 0 "check" up check "$rel" u h "$srv/" ""
-expect_contains "counts the deletes" "2 to delete" "$OUT"
+expect_contains "counts the deletes" "2 file(s) and 0 director(ies) to delete" "$OUT"
 deletes="$(cat "$rel.deletes")"
 expect_contains "would delete stale.php" "stale.php" "$deletes"
 expect_contains "would delete a stale file in a carried module" "modules/ext/old.php" "$deletes"

@@ -68,6 +68,11 @@ while read -r name sha; do
             out="$(gh api "repos/${repo[$name]}/compare/$sha...$was" --jq '.status, (.files[].filename)' 2>/dev/null)" \
                 || { echo "$name: cannot compare $range on GitHub"; continue; }
         fi
+        if [ "$(head -n1 <<< "$out")" = diverged ]; then
+            # force-push or rewritten branch: the compare lists only the
+            # merge base to the new commit, so the old side is unseen
+            echo "$name: history diverged between ${was:0:7} and ${sha:0:7}; check its sql/ by hand"
+        fi
         files="$(tail -n +2 <<< "$out")"
         if [ "$(grep -c . <<< "$files" || true)" -ge 300 ]; then
             echo "$name: cannot fully compare $range (300 or more files changed); check its sql/ by hand"
