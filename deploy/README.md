@@ -83,6 +83,10 @@ directory from the original installation, delete it by hand.
 runs when:
 
 - the CI image workflow succeeds on a push to `master-ark`;
+- anything is pushed to `master-ark`, because the CI image workflow ignores
+  pushes that touch only files outside the image (`makefile.json`,
+  `.htaccess`, docs). When the head changes the image, the run deploys the last
+  green commit instead, and the CI image run deploys the head later;
 - an extension's `notify-deploy.yml` sends `extension-green` after its CI
   succeeds on its deploy branch;
 - someone runs it by hand.
@@ -91,9 +95,16 @@ Each run pins FrontAccounting and every extension in `master-ark`'s
 `components` to its newest commit that passed CI (`deploy/resolve-refs.sh`).
 It then builds the release, lists any `sql/` changes since the server's
 `.deploy-manifest` (`deploy/sql-changes.sh`), runs `deploy-check` with a limit
-of 25 deletes, and uploads. Runs queue one behind another.
+of 25 deletes, and uploads.
 
-The `bms` environment holds:
+GitHub keeps one run going and one pending run per group, and cancels an older
+pending run when a newer one arrives. Each run resolves afresh, so the newest
+pending run ships everything the cancelled ones would have. A manual run with
+pinned `refs` can be cancelled the same way: if it shows as cancelled, run it
+again once the queue is quiet.
+
+The `bms` environment allows deployments from `master-cp` and `master-ark`
+only. It holds:
 
 | name | kind | value |
 | --- | --- | --- |

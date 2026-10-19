@@ -5,8 +5,18 @@ name: Deploy bms
 # (deploy/resolve-refs.sh). It lives on master-cp, the default branch,
 # because GitHub runs workflow_run and repository_dispatch workflows only from
 # there; it builds from master-ark. See deploy/README.md.
+#
+# A push to master-ark also starts it, because the CI image workflow has a
+# paths filter and a push that touches only other files (makefile.json,
+# .htaccess, docs) would never deploy otherwise. That is safe: when the head
+# changes the image, resolve-refs.sh deploys the last commit that passed CI
+# instead, so nothing untested ships, and the CI image run deploys the head
+# once it is green. A push run uses master-ark's copy of this file, so the bms
+# environment must allow master-ark as well as master-cp.
 
 on:
+  push:
+    branches: [master-ark]
   workflow_run:
     workflows: [CI image]
     types: [completed]
@@ -32,18 +42,18 @@ permissions:
   contents: read
   actions: read
 
-# One at a time. A pending run replaces an older pending one, which is fine:
-# every run resolves afresh.
-concurrency:
-  group: deploy-bms
-  cancel-in-progress: false
-
 defaults:
   run:
     shell: bash
 
 jobs:
   deploy:
+    # On the job, not the workflow, so a run the filter below skips never joins
+    # the group and replaces a waiting deploy. A pending run replaces an older
+    # pending one, which is fine: every run resolves afresh.
+    concurrency:
+      group: deploy-bms
+      cancel-in-progress: false
     if: >-
       github.event_name != 'workflow_run'
       || (github.event.workflow_run.conclusion == 'success'
@@ -143,6 +153,7 @@ jobs:
       - name: Summary
         if: always()
         run: |
+          bt='`'
           {
               if [ "$LIVE" = true ]; then
                   echo "## bms deploy"
@@ -159,13 +170,18 @@ jobs:
                   cat build/release.manifest
                   printf '```\n'
               fi
+              if [ -f build/release.previous ] && [ ! -s build/release.previous ]; then
+                  printf '\nNo previous deploy recorded on the server, so database changes were not checked.\n'
+              fi
               if [ -s build/sql-changes.txt ]; then
                   printf '\n### Database changes to apply by hand\n\n'
                   sed 's/^/- /' build/sql-changes.txt
               fi
               if [ -s build/release.deletes ]; then
                   printf '\n### Files deleted from the server\n\n'
-                  sed 's/.*/- BT&BT/' build/release.deletes | sed 's/BT/\x60/g'
+                  while IFS= read -r line; do
+                      printf -- '- %s%s%s\n' "$bt" "$line" "$bt"
+                  done < build/release.deletes
               fi
           } >> "$GITHUB_STEP_SUMMARY"
 

@@ -82,6 +82,10 @@ default branch. The workflow checks out `master-ark` to build.
 Triggers:
 
 - `workflow_run` of "CI image", completed with success on `master-ark`.
+- `push` to `master-ark`. CI image has a paths filter, so a push touching only
+  other files (`makefile.json`, `.htaccess`, docs) would never deploy. When the
+  head changes the image, §3 picks the last green commit, so nothing untested
+  ships.
 - `repository_dispatch` of type `extension-green`, with payload
   `{component, sha, run_url}`. The payload is logged and otherwise ignored
   (§4).
@@ -98,7 +102,7 @@ the check, like a dry run. bms and `master-ark` are both on FrontAccounting
 ship 2.4.20 code to a 2.4.3 database. A manual run goes live whenever
 `dry_run` is off.
 
-`concurrency: {group: deploy-bms, cancel-in-progress: false}`. GitHub keeps one
+`concurrency: {group: deploy-bms, cancel-in-progress: false}`, on the job so a run its `if:` skips never joins the group. GitHub keeps one
 pending run behind the running one and replaces older pending runs. That is
 correct here: every run re-resolves from scratch, so the newest pending run
 covers everything the replaced ones would have shipped.
@@ -234,7 +238,7 @@ that also makes `plugin-test.yml` accept `ark`.
 | `DEPLOY_LIVE` | `bms` environment variable | `true` lets automatic runs deploy. Unset until the 2.4.20 upgrade is live. |
 | `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH` | `bms` environment variables | Passed as `host=`, `user=` and `path=`, so CI deploys to `<user>@<host>:<path>`. Named so they don't clobber the runner's `$USER`. `DEPLOY_PATH` is `/` because rrsync roots the key at the site directory (see "The server" below). |
 
-The `bms` environment only allows deployments from `master-cp`, so workflows on
+The `bms` environment only allows deployments from `master-cp` and `master-ark`, so workflows on
 other branches and pull requests cannot read the key.
 
 ### The server
