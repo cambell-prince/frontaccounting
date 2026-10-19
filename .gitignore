@@ -38,3 +38,4 @@ vendor_bower/
 /log/
 /docker/ci/dev/*.env
 !/docker/ci/dev/example.env
+!/docker/ci/dev/mcp.env

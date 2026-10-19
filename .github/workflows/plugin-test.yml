@@ -14,6 +14,16 @@ name: Plugin test
 #         php: ${{ matrix.php }}
 #         setup: composer install --no-interaction --no-progress
 #         test: sh tools/ci.sh
+#     coverage:
+#       uses: cambell-prince/frontaccounting/.github/workflows/plugin-test.yml@master-cp
+#       with:
+#         fa: cp
+#         php: '8.3'
+#         setup: composer install --no-interaction --no-progress
+#         test: sh tools/coverage.sh
+#         coverage: build/coverage.xml
+#       secrets:
+#         codecov-token: ${{ secrets.CODECOV_TOKEN }}
 
 on:
   workflow_call:
@@ -58,9 +68,16 @@ on:
         description: The module name, for a checkout without hooks.php
         type: string
         default: ''
+      coverage:
+        description: A Clover coverage file the test command writes, relative to the plugin checkout (e.g. build/coverage.xml); uploaded to Codecov when set
+        type: string
+        default: ''
     secrets:
       clone-token:
         description: Token for cloning private repositories named in `with`
+        required: false
+      codecov-token:
+        description: Codecov upload token (the organisation's CODECOV_TOKEN); needed when coverage is set
         required: false
 
 permissions:
@@ -132,3 +149,26 @@ jobs:
               [ -n "$line" ] && args+=(--with "$line")
           done <<< "$WITH"
           fa-ci/docker/ci/plugin-test.sh "${args[@]}" plugin -- "$TEST"
+      # The checkout is bind-mounted into the container (plugin-test.sh), so the
+      # file the test command wrote there is on the runner.
+      # Secrets can't be tested in a step `if:`, so read the token through env.
+      # Without it (pull requests from forks, Dependabot) the upload is skipped.
+      - name: Check for a Codecov token
+        id: codecov
+        env:
+          CODECOV_TOKEN: ${{ secrets.codecov-token }}
+        run: |
+          if [ -n "$CODECOV_TOKEN" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload coverage
+        if: inputs.coverage != '' && steps.codecov.outputs.has_token == 'true'
+        uses: codecov/codecov-action@v5
+        with:
+          working-directory: plugin
+          files: ${{ inputs.coverage }}
+          token: ${{ secrets.codecov-token }}
+          fail_ci_if_error: true
+          disable_search: true

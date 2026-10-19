@@ -42,6 +42,29 @@ Inputs:
 - `fa-ref`: which revision of these scripts drives the run.
 - `activate: false` and `name`: for a checkout that isn't an FA extension.
 - Secret `clone-token`: for private `with` repos.
+- `coverage` and secret `codecov-token`: `coverage` is a Clover file the test
+  command writes, relative to the plugin checkout; when set, it is uploaded to
+  Codecov with the token. The upload is skipped, not failed, when the secret is
+  empty (pull requests from forks and Dependabot get no secrets); when it runs,
+  an upload error fails the job. The coverage job to add to a plugin's workflow
+  is in the header of `.github/workflows/plugin-test.yml`.
+
+Coverage notes:
+
+- The plugin is mounted at `/var/www/html/modules/<name>`, so the Clover file
+  lists container paths. Map them back in the plugin's `codecov.yml`:
+
+```yaml
+fixes:
+  - "/var/www/html/modules/<name>/::"
+```
+
+- xdebug is installed in the image but disabled, so a plain
+  `phpunit --coverage-clover` finds no coverage driver and writes no file. The
+  test command must load it, for example with an extra scan directory holding
+  `zend_extension=xdebug`, and set `XDEBUG_MODE=coverage`. If it runs composer,
+  also set `COMPOSER_ALLOW_XDEBUG=1` and `COMPOSER_PROCESS_TIMEOUT=0`. See
+  `tools/coverage.sh` in the mcp module for a working script.
 
 ## Locally
 
@@ -75,6 +98,9 @@ Which modules are extensions in it is opt-in, in `docker/ci/dev/<env>.env`:
 `--env NAME` keeps several side by side, each with its own
 `docker/ci/dev/NAME.env`, port and database. After activation, each module's
 own `tools/init.sh` (if it has one) runs in its directory.
+
+Ready-made environments: `mcp.env` (`sgw_sales`, `graphql` and `mcp`, on port
+8101).
 
 A copy of a real site: set `FA_DEV_DATASET` to its backup and
 `FA_DEV_EXTENSIONS` to its `installed_extensions.php`. The modules then keep
