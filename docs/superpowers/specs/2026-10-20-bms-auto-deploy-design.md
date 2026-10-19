@@ -32,7 +32,7 @@ In scope:
 
 - The deploy workflow, its helper scripts and the changes to `deploy/`.
 - An `ark` flavour of the CI image, built on pushes to `master-ark`.
-- A `notify-deploy` job in each extension's CI.
+- A `notify-deploy.yml` workflow in each extension repository.
 - The server preparation, which the runbook covers step by step.
 
 Out of scope:
@@ -90,7 +90,13 @@ Triggers:
   - `refs` (optional overrides, `path=sha` separated by spaces)
   - `max_deletes` (default 25)
 
-Automatic triggers always run live, with `max_deletes` at 25.
+Automatic triggers run with `max_deletes` at 25, and go live only when the
+`bms` environment variable `DEPLOY_LIVE` is `true`. Until then they stop after
+the check, like a dry run. bms and `master-ark` are both on FrontAccounting
+2.4.3, and the 2.4.20 upgrade needs database migrations done by hand. So
+`DEPLOY_LIVE` is set only after that upgrade is live, and no automatic run can
+ship 2.4.20 code to a 2.4.3 database. A manual run goes live whenever
+`dry_run` is off.
 
 `concurrency: {group: deploy-bms, cancel-in-progress: false}`. GitHub keeps one
 pending run behind the running one and replaces older pending runs. That is
@@ -103,12 +109,16 @@ actions: read}`. It runs these steps:
 1. **Resolve.** `deploy/resolve-refs.sh` (§3) prints `ref=<sha>` and a
    `components` string with every ref pinned to a SHA. `refs` overrides
    replace the matching entries.
-2. **Build.** `make.phar release ref=… components=…`.
-3. **Check.** `make.phar deploy-check` with `host`, `user` and `path` set.
+2. **Build.** `deploy/build-release.sh`, with `php` and `components` read
+   from `master-ark`'s `makefile.json` with `jq`. The workflow calls the
+   scripts that make.phar's targets wrap, because `saygoweb/phpmake` publishes
+   no release to install on a runner.
+3. **Check.** `deploy/upload.sh check`, with `host`, `user` and `path` set.
    The step fails if more than `max_deletes` files would be deleted, which
    catches a broken release (an empty extension, say) before it can wipe the
    server. It also runs the migration check in §5.
-4. **Deploy** (skipped when `dry_run`). `make.phar deploy confirm=yes`.
+4. **Deploy** (skipped on a dry run, and on an automatic run until
+   `DEPLOY_LIVE` is `true`). `deploy/upload.sh go`.
 5. **Report.** The manifest, the deletion list and any migration warnings go
    to the job summary. The manifest is also uploaded as an artifact.
 
@@ -131,8 +141,11 @@ another repository's head while that head is still under test.
      in progress, and will trigger its own deploy when it finishes, or it
      failed.
 
-  The script reads the `paths` list from `ci-image.yml` with `yq`, which is
-  preinstalled on GitHub's runners, so the list isn't duplicated.
+  The script reads the list under `paths: &image-paths` in `ci-image.yml`
+  with `awk`, so the list isn't duplicated. It matches with bash patterns,
+  where `*` also matches `/`. That can treat a change as touching the image
+  when GitHub wouldn't, and then the script picks G. It never wrongly picks
+  H.
 - **No green run at all** for a component fails the job, naming the
   component.
 
@@ -194,12 +207,18 @@ New files:
 
 ### The four extension repositories
 
-Each `ci.yml` gains a `notify-deploy` job:
+Each gains `.github/workflows/notify-deploy.yml`:
 
-- `needs: test`, and `if: github.event_name == 'push' && github.ref == 'refs/heads/<deploy branch>'`.
+- It runs on `workflow_run` of `CI` completing on the deploy branch, and only
+  when that run succeeded on a push.
+- It is a separate workflow, not a job inside `ci.yml`. A job inside `ci.yml`
+  would dispatch while its own run was still in progress, so resolve would
+  not yet count that commit as green and would deploy the previous one. A
+  failed dispatch also leaves the CI result alone.
 - It runs `gh api repos/cambell-prince/frontaccounting/dispatches` with
   `event_type: extension-green` and `client_payload: {component, sha, run_url}`,
   using `secrets.FA_DEPLOY_DISPATCH`.
+- If the secret isn't set, it says so and succeeds.
 
 Optionally, each extension's test matrix adds `fa: ark`, so the extension is
 also tested against the FrontAccounting that gets deployed with it. Doing
@@ -212,6 +231,7 @@ that also makes `plugin-test.yml` accept `ark`.
 | `FA_DEPLOY_DISPATCH` | saygoweb organisation secret, visible to the four extension repositories | Fine-grained PAT of cambell-prince, access to `cambell-prince/frontaccounting` only, Contents read/write (the minimum for `repository_dispatch`). Rotated before it expires. |
 | `BMS_SSH_KEY` | `bms` environment secret | Private half of the dedicated ed25519 deploy key |
 | `BMS_KNOWN_HOSTS` | `bms` environment secret | aws1's ed25519 host key, pinned after comparing fingerprints |
+| `DEPLOY_LIVE` | `bms` environment variable | `true` lets automatic runs deploy. Unset until the 2.4.20 upgrade is live. |
 | `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH` | `bms` environment variables | Passed as `host=`, `user=` and `path=`, so CI deploys to `<user>@<host>:<path>`. Named so they don't clobber the runner's `$USER`. `DEPLOY_PATH` is `/` because rrsync roots the key at the site directory (see "The server" below). |
 
 The `bms` environment only allows deployments from `master-cp`, so workflows on
@@ -285,8 +305,10 @@ The runbook covers the details. In summary:
    only leftovers from the manual syncs.
 6. The first live deploy by hand while watching, then the runbook's server and
    browser checks.
-7. `notify-deploy` merged into the extensions one at a time. A trivial push to
+7. bms is upgraded to 2.4.20 by its own runbook, and `master-ark` takes
+   the merge. Then `DEPLOY_LIVE` is set to `true`.
+8. `notify-deploy.yml` merged into the extensions one at a time. A trivial push to
    one of them must reach the server on its own.
-8. The manual sync is retired. `deploy/README.md` gains a section on the
+9. The manual sync is retired. `deploy/README.md` gains a section on the
    GitHub deploy and the bms environment. `make.phar deploy` from a
    workstation stays available for emergencies.
