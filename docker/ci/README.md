@@ -42,6 +42,22 @@ Inputs:
 - `fa-ref`: which revision of these scripts drives the run.
 - `activate: false` and `name`: for a checkout that isn't an FA extension.
 - Secret `clone-token`: for private `with` repos.
+- `coverage` and secret `codecov-token`: `coverage` is a Clover file the test
+  command writes, relative to the plugin checkout; when set, it is uploaded to
+  Codecov with the token. A second job reports coverage:
+
+```yaml
+  coverage:
+    uses: cambell-prince/frontaccounting/.github/workflows/plugin-test.yml@master-cp
+    with:
+      fa: cp
+      php: '8.3'
+      setup: composer install --no-interaction --no-progress
+      test: sh tools/coverage.sh
+      coverage: build/coverage.xml
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+```
 
 ## Locally
 
@@ -75,6 +91,9 @@ Which modules are extensions in it is opt-in, in `docker/ci/dev/<env>.env`:
 `--env NAME` keeps several side by side, each with its own
 `docker/ci/dev/NAME.env`, port and database. After activation, each module's
 own `tools/init.sh` (if it has one) runs in its directory.
+
+Ready-made environments: `mcp.env` (`sgw_sales`, `graphql` and `mcp`, on port
+8101).
 
 A copy of a real site: set `FA_DEV_DATASET` to its backup and
 `FA_DEV_EXTENSIONS` to its `installed_extensions.php`. The modules then keep
