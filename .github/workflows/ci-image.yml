@@ -113,6 +113,8 @@ jobs:
           done
 
   prune:
+    # housekeeping: a GHCR hiccup must not turn a good build into a failed run
+    continue-on-error: true
     needs: build
     if: ${{ !cancelled() && needs.build.result != 'skipped' }}
     runs-on: ubuntu-24.04
