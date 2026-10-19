@@ -167,8 +167,8 @@ jobs:
         if: inputs.coverage != '' && steps.codecov.outputs.has_token == 'true'
         uses: codecov/codecov-action@v5
         with:
-          files: plugin/${{ inputs.coverage }}
-          root_dir: plugin
+          working-directory: plugin
+          files: ${{ inputs.coverage }}
           token: ${{ secrets.codecov-token }}
           fail_ci_if_error: true
           disable_search: true
