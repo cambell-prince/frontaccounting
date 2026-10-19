@@ -15,7 +15,9 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 # gh stand-in: answers "gh api repos/<o>/<r>/compare/<a>...<b>" from
-# $GH_STUB_COMPARE lines "<o>/<r> <a>...<b> <file>"; an unknown range is a 404.
+# $GH_STUB_COMPARE lines "<o>/<r> <a>...<b> <status> <file>"; prints the
+# status, then the files (what the script's --jq asks for). An unknown range
+# is a 404.
 mkdir "$work/bin"
 cat > "$work/bin/gh" <<'EOF'
 #!/usr/bin/env bash
@@ -24,8 +26,11 @@ cat > "$work/bin/gh" <<'EOF'
 slug="${BASH_REMATCH[1]}"
 range="${BASH_REMATCH[2]}"
 hit=no
-while read -r s r f; do
-    if [ "$s" = "$slug" ] && [ "$r" = "$range" ]; then echo "$f"; hit=yes; fi
+while read -r s r st f; do
+    if [ "$s" = "$slug" ] && [ "$r" = "$range" ]; then
+        [ "$hit" = yes ] || echo "$st"
+        echo "$f"; hit=yes
+    fi
 done < "$GH_STUB_COMPARE"
 [ "$hit" = yes ] || { echo "HTTP 404" >&2; exit 1; }
 EOF
@@ -47,8 +52,8 @@ f2="$(git -C "$fa" rev-parse HEAD)"
 
 # sha40 <char>: a made-up 40-character commit id
 sha40() { local s; s="$(printf '%040d' 0)"; printf '%s\n' "${s//0/$1}"; }
-x1="$(sha40 1)"; x2="$(sha40 2)"; y1="$(sha40 3)"; z2="$(sha40 4)"; n1="$(sha40 5)"; w1="$(sha40 6)"; w2="$(sha40 7)"
-comps="modules/x|https://github.com/o/x.git|main modules/y|https://github.com/o/y.git|main modules/z|https://github.com/o/z.git|main modules/n|https://github.com/o/n.git|main modules/w|git@github.com:o/w.git|main"
+x1="$(sha40 1)"; x2="$(sha40 2)"; y1="$(sha40 3)"; z2="$(sha40 4)"; n1="$(sha40 5)"; w1="$(sha40 6)"; w2="$(sha40 7)"; r1="$(sha40 8)"; r2="$(sha40 9)"; q1="$(sha40 b)"; q2="$(sha40 c)"
+comps="modules/x|https://github.com/o/x.git|main modules/y|https://github.com/o/y.git|main modules/z|https://github.com/o/z.git|main modules/n|https://github.com/o/n.git|main modules/w|git@github.com:o/w.git|main modules/r|https://github.com/o/r.git|main modules/q|https://github.com/o/q.git|main"
 cat > "$work/prev" <<EOF
 built 2026-10-20T00:00:00Z on test
 frontaccounting master-ark $f1 one
@@ -57,6 +62,8 @@ modules/y main $y1 y
 modules/z main abc1234 z, from an older build
     composer: nodev
 modules/w main $w1 w
+modules/r main $r1 r
+modules/q main $q1 q
 EOF
 cat > "$work/new" <<EOF
 built 2026-10-21T00:00:00Z on test
@@ -66,11 +73,17 @@ modules/y $y1 $y1 y
 modules/z $z2 $z2 z
 modules/n $n1 $n1 n
 modules/w $w2 $w2 w
+modules/r $r2 $r2 r
+modules/q $q2 $q2 q
 EOF
 cat > "$work/compare" <<EOF
-o/x $x1...$x2 sql/update_2.sql
-o/x $x1...$x2 README.md
+o/x $x1...$x2 ahead sql/update_2.sql
+o/x $x1...$x2 ahead README.md
+o/r $r1...$r2 behind
+o/r $r2...$r1 ahead sql/update_3.sql
+o/r $r2...$r1 ahead README.md
 EOF
+for i in $(seq 1 300); do echo "o/q $q1...$q2 ahead file$i.txt"; done >> "$work/compare"
 
 changes() { (cd "$fa" && PATH="$work/bin:$PATH" GH_STUB_COMPARE="$work/compare" "$root/deploy/sql-changes.sh" "$@"); }
 
@@ -82,6 +95,9 @@ expect_absent "an unchanged component is not mentioned" "modules/y" "$OUT"
 expect_contains "a short commit cannot be compared" "modules/z: cannot compare" "$OUT"
 expect_contains "a new component is pointed out" "modules/n: new in this deploy" "$OUT"
 expect_contains "a failed comparison is reported" "modules/w: cannot compare ${w1:0:7}..${w2:0:7} on GitHub" "$OUT"
+expect_contains "a rollback is said to be one" "modules/r: rolled back from ${r1:0:7} to ${r2:0:7}" "$OUT"
+expect_contains "and lists what the rolled-back range changed in sql/" "modules/r: sql/update_3.sql" "$OUT"
+expect_contains "300 files is a truncated compare" "modules/q: cannot fully compare ${q1:0:7}..${q2:0:7} (300 or more files changed); check its sql/ by hand" "$OUT"
 
 : > "$work/empty"
 expect_status 0 "the first deploy" changes "$work/empty" "$work/new" "$comps"

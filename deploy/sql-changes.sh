@@ -59,8 +59,20 @@ while read -r name sha; do
         files="$(git diff --name-only "$was" "$sha" -- sql/ 2>/dev/null)" \
             || { echo "$name: cannot compare $range in this checkout"; continue; }
     elif [ -n "${repo[$name]:-}" ]; then
-        files="$(gh api "repos/${repo[$name]}/compare/$was...$sha" --jq '.files[].filename' 2>/dev/null)" \
+        out="$(gh api "repos/${repo[$name]}/compare/$was...$sha" --jq '.status, (.files[].filename)' 2>/dev/null)" \
             || { echo "$name: cannot compare $range on GitHub"; continue; }
+        if [ "$(head -n1 <<< "$out")" = behind ]; then
+            # the new commit is an ancestor of the old: a rollback. What the
+            # old direction would have undone is the reverse comparison.
+            echo "$name: rolled back from ${was:0:7} to ${sha:0:7}; sql/ changes in the range it left:"
+            out="$(gh api "repos/${repo[$name]}/compare/$sha...$was" --jq '.status, (.files[].filename)' 2>/dev/null)" \
+                || { echo "$name: cannot compare $range on GitHub"; continue; }
+        fi
+        files="$(tail -n +2 <<< "$out")"
+        if [ "$(grep -c . <<< "$files" || true)" -ge 300 ]; then
+            echo "$name: cannot fully compare $range (300 or more files changed); check its sql/ by hand"
+            continue
+        fi
         files="$(grep '^sql/' <<< "$files" || true)"
     else
         echo "$name: cannot compare, it is not in the components list"
