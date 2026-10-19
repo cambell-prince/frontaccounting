@@ -17,6 +17,7 @@
 # being tested, and its run triggers its own deploy, or it failed.
 # A component: the head of the newest successful push run of its ci.yml on the
 # branch its ref names.
+# A ref that is already a 40-hex commit is used as it is.
 # <overrides>: space-separated <path>=<sha>, and frontaccounting=<sha>, used
 # as given.
 #
@@ -38,7 +39,7 @@ declare -A pin=() used=()
 for o in $overrides; do
     k="${o%%=*}"
     v="${o#*=}"
-    [[ "$o" == *=* && "$v" =~ ^[0-9a-f]{40}$ ]] || die "override '$o' is not <path>=<40-hex commit>"
+    [[ "$o" == *=* && -n "$k" && "$v" =~ ^[0-9a-f]{40}$ ]] || die "override '$o' is not <path>=<40-hex commit>"
     pin[$k]="$v"
 done
 
@@ -78,7 +79,7 @@ touches_image() {
             # shellcheck disable=SC2053 # $p is a glob on purpose
             [[ "$f" == $p ]] && return 0
         done
-    done < <(git diff --name-only "$1" "$2")
+    done < <(git diff --name-only --no-renames "$1" "$2")
     return 1
 }
 
@@ -114,6 +115,9 @@ for c in $components; do
         sha="${pin[$path]}"
         used[$path]=1
         note "$path: $sha (override)"
+    elif [[ "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+        sha="$ref"
+        note "$path: $sha (pinned in components)"
     else
         slug="$(repo_slug "$repo")" || die "$path: '$repo' is not a GitHub repository URL"
         sha="$(newest_green "$slug" ci.yml "$ref")" || die "$path: could not read CI runs of $slug"

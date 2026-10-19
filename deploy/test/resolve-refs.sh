@@ -40,8 +40,9 @@ git init -q -b master-ark "$fa"
 git -C "$fa" config user.email test@example.com
 git -C "$fa" config user.name test
 mkdir -p "$fa/.github/workflows" "$fa/docs" "$fa/reporting"
+printf 'a file that will move out of the image paths\n' > "$fa/reporting/old.txt"
 cp "$root/.github/workflows/ci-image.yml" "$fa/.github/workflows/"
-git -C "$fa" add .github
+git -C "$fa" add .github reporting
 git -C "$fa" commit -qm green
 c1="$(git -C "$fa" rev-parse HEAD)"
 echo notes > "$fa/docs/notes.md"
@@ -81,6 +82,14 @@ expect_status 0 "a head that changes the image" resolve master-ark "$comps"
 expect_contains "takes the last green commit" "ref=$c1" "$OUT"
 expect_contains "and says why" "has not passed CI image" "$OUT"
 
+# a rename out of an image path still counts: the old path is a change
+git -C "$fa" checkout -q -b renamed "$c2"
+git -C "$fa" mv reporting/old.txt docs/old.txt
+git -C "$fa" commit -qm rename
+expect_status 0 "a head that renames a file out of an image path" resolve master-ark "$comps"
+expect_contains "takes the last green commit" "ref=$c1" "$OUT"
+git -C "$fa" checkout -q "$c3"
+
 git -C "$fa" checkout -q "$c1"
 expect_status 0 "a green head" resolve master-ark "$comps"
 expect_contains "takes it" "ref=$c1" "$OUT"
@@ -92,6 +101,12 @@ expect_contains "and a component" "modules/a|https://github.com/o/a.git|$e1 " "$
 expect_status 1 "refuses an override for no component" resolve master-ark "$comps" "modules/zz=$e1"
 expect_contains "naming it" "modules/zz" "$OUT"
 expect_status 1 "refuses an override that is not a commit" resolve master-ark "$comps" "modules/a=main"
+expect_status 1 "refuses an override with no path" resolve master-ark "$comps" "=$e1"
+expect_contains "with the usual message" "is not <path>=<40-hex commit>" "$OUT"
+
+expect_status 0 "a component whose ref is already a commit" resolve master-ark "modules/p|https://github.com/o/nowhere.git|$e1"
+expect_contains "is passed through" "components=modules/p|https://github.com/o/nowhere.git|$e1" "$OUT"
+expect_contains "and says it was pinned" "pinned in components" "$OUT"
 
 expect_status 1 "a component with no green run" resolve master-ark "modules/n|https://github.com/o/none.git|main"
 expect_contains "fails naming it" "modules/n: no successful ci.yml push run" "$OUT"
