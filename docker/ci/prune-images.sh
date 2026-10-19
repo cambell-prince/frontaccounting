@@ -68,8 +68,8 @@ open_prs() {
 }
 
 JQ_TAGS='
-    def sha_tag: test("^(cp|upstream)-php[0-9.]+-[0-9a-f]{7,40}$");
-    def pr_tag: test("^pr-[0-9]+-(cp|upstream)-php[0-9.]+$");
+    def sha_tag: test("^(cp|upstream|ark)-php[0-9.]+-[0-9a-f]{7,40}$");
+    def pr_tag: test("^pr-[0-9]+-(cp|upstream|ark)-php[0-9.]+$");
     def pr_number: capture("^pr-(?<n>[0-9]+)-").n | tonumber;
     # A tag it does not recognise (the moving ones above all) protects a version.
     def protected: any(.tags[]; (sha_tag or pr_tag) | not);

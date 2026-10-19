@@ -13,10 +13,11 @@ p="$here/../prune-images.sh"
 f="$here/fixtures/prune/versions.json"
 
 expect_status 0 "dry run" env PRUNE_VERSIONS_FILE="$f" PRUNE_OPEN_PRS='17 19' "$p" --dry-run
-for id in 5 8 10 11 12; do expect_contains "deletes version $id" "would delete $id " "$OUT"; done
-for id in 1 2 3 4 6 7 9 13; do expect_absent "keeps version $id" "would delete $id " "$OUT"; done
+for id in 5 8 10 11 12 17 18; do expect_contains "deletes version $id" "would delete $id " "$OUT"; done
+for id in 1 2 3 4 6 7 9 13 14 15 16; do expect_absent "keeps version $id" "would delete $id " "$OUT"; done
 expect_contains "says why for the old sha" "older than the newest 3 cp-php7.4-<sha>" "$OUT"
-expect_contains "counts them" "5 version(s) would be deleted (dry run)" "$OUT"
+expect_contains "and for an old ark sha" "older than the newest 3 ark-php7.4-<sha>" "$OUT"
+expect_contains "counts them" "7 version(s) would be deleted (dry run)" "$OUT"
 
 expect_status 0 "--keep 1" env PRUNE_VERSIONS_FILE="$f" PRUNE_OPEN_PRS='17' "$p" --dry-run --keep 1
 for id in 3 4; do expect_contains "--keep 1 also deletes version $id" "would delete $id " "$OUT"; done
