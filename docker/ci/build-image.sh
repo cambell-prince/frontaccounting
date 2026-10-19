@@ -2,11 +2,13 @@
 #
 # Build the FrontAccounting CI image for one flavour and PHP version.
 #
-#   docker/ci/build-image.sh [--cache-gha] <cp|upstream> <php> <tag> [<tag>...]
+#   docker/ci/build-image.sh [--cache-gha] <cp|ark|upstream> <php> <tag> [<tag>...]
 #
 #   cp          FrontAccounting from this checkout's HEAD (git archive, so
 #               committed files only; docker/ci itself is read from the
 #               working tree)
+#   ark         the same, for a master-ark checkout; its own name keeps its
+#               images apart from master-cp's
 #   upstream    FrontAccounting from $FA_UPSTREAM_REPO at $FA_UPSTREAM_REF
 #               (default FrontAccountingERP/FA master)
 #   --cache-gha use GitHub Actions' cache for the layers (CI only)
@@ -25,7 +27,7 @@ root="$(cd "$here/../.." && pwd)"
 
 gha=no
 if [ "${1:-}" = --cache-gha ]; then gha=yes; shift; fi
-[ "$#" -ge 3 ] || die "usage: build-image.sh [--cache-gha] <cp|upstream> <php> <tag>..."
+[ "$#" -ge 3 ] || die "usage: build-image.sh [--cache-gha] <cp|ark|upstream> <php> <tag>..."
 flavour="$1"
 php="$2"
 shift 2
@@ -35,7 +37,7 @@ trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/fa" "$stage/fixture"
 
 case "$flavour" in
-    cp)
+    cp|ark)
         git -C "$root" archive HEAD | tar -x -C "$stage/fa"
         fa_ref="${FA_CI_REF_NAME:-$(git -C "$root" symbolic-ref -q --short HEAD || git -C "$root" rev-parse --short HEAD)}"
         fa_sha="$(git -C "$root" rev-parse HEAD)"
@@ -47,7 +49,7 @@ case "$flavour" in
         fa_sha="$(git -C "$stage/fa" rev-parse HEAD)"
         rm -rf "$stage/fa/.git"
         ;;
-    *) die "flavour must be cp or upstream, not '$flavour'" ;;
+    *) die "flavour must be cp, ark or upstream, not '$flavour'" ;;
 esac
 cp "$root/modules/tests/data/fa_test.sql.gz" "$stage/fixture/"
 

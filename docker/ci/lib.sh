@@ -5,7 +5,7 @@ log() { printf '\n\033[36m==>\033[0m %s\n' "$*" >&2; }
 die() { printf '%s: %s\n' "$(basename "$0")" "$*" >&2; exit 1; }
 
 # fa_ci_image <flavour> <php>: the published image for a FrontAccounting
-# flavour (cp or upstream) and PHP version.
+# flavour (cp, ark or upstream) and PHP version.
 fa_ci_image() { printf 'ghcr.io/cambell-prince/frontaccounting-ci:%s-php%s\n' "$1" "$2"; }
 
 # module_name <checkout>: the FrontAccounting module name, from the

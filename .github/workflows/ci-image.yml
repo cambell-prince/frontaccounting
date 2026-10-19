@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - master-cp
+      - master-ark
     paths: &image-paths
       - '*.php'
       - access/**
@@ -68,7 +69,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        fa: [cp, upstream]
+        # master-ark (pushes, and pull requests into it) builds its own
+        # flavour; everything else builds master-cp's and upstream's.
+        fa: ${{ fromJSON((github.base_ref || github.ref_name) == 'master-ark' && '["ark"]' || '["cp","upstream"]') }}
         php: ['7.4', '8.3']
     steps:
       - uses: actions/checkout@v7
@@ -110,6 +113,8 @@ jobs:
           done
 
   prune:
+    # housekeeping: a GHCR hiccup must not turn a good build into a failed run
+    continue-on-error: true
     needs: build
     if: ${{ !cancelled() && needs.build.result != 'skipped' }}
     runs-on: ubuntu-24.04

@@ -1,3 +1,10 @@
+# The record of the last deploy (build host, commits, package lists).
+<Files ".deploy-manifest">
+	Order allow,deny
+	Deny from All
+	Satisfy All
+</Files>
+
 # Protect sensitive files.
 <FilesMatch "\.(inc|po|sh|.*sql|log)$">
 	Order allow,deny

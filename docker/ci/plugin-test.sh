@@ -19,7 +19,7 @@
 # Options:
 #   --image IMG            the CI image (default: $FA_CI_IMAGE, else the one
 #                          --fa and --php name)
-#   --fa cp|upstream       FrontAccounting flavour (default: cp)
+#   --fa cp|ark|upstream   FrontAccounting flavour (default: cp)
 #   --php 7.4|8.3          PHP version (default: 7.4)
 #   --dataset test|demo    the database the run starts from (default: test,
 #                          the image's fa_test; demo is FrontAccounting's demo

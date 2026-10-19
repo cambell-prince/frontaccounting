@@ -41,7 +41,7 @@ on:
         type: string
         default: ''
       fa:
-        description: FrontAccounting flavour, cp (cambell-prince/frontaccounting master-cp) or upstream
+        description: FrontAccounting flavour, cp (cambell-prince/frontaccounting master-cp), ark (its master-ark) or upstream
         type: string
         default: cp
       php:

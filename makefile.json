@@ -4,7 +4,10 @@
         "release": "build/release",
         "components": "",
         "php": "7.4.33",
-        "dest": "",
+        "user": "",
+        "host": "",
+        "path": "",
+        "max_deletes": "",
         "remote_user": "",
         "confirm": "no",
         "db_ssh": "",
@@ -19,12 +22,17 @@
     },
     "deploy-check": {
         "by": [
-            "sh deploy/upload.sh check '{{release}}' '{{dest}}' '{{remote_user}}'"
+            "sh deploy/upload.sh check '{{release}}' '{{user}}' '{{host}}' '{{path}}' '{{remote_user}}' '{{max_deletes}}'"
         ]
     },
     "deploy": {
         "by": [
-            "sh deploy/upload.sh go '{{release}}' '{{dest}}' '{{remote_user}}' '{{confirm}}'"
+            "sh deploy/upload.sh go '{{release}}' '{{user}}' '{{host}}' '{{path}}' '{{remote_user}}' '{{confirm}}'"
+        ]
+    },
+    "deploy-previous": {
+        "by": [
+            "sh deploy/upload.sh previous '{{release}}' '{{user}}' '{{host}}' '{{path}}' '{{remote_user}}'"
         ]
     },
     "package": {
