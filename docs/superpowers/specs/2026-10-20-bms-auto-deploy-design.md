@@ -212,7 +212,7 @@ that also makes `plugin-test.yml` accept `ark`.
 | `FA_DEPLOY_DISPATCH` | saygoweb organisation secret, visible to the four extension repositories | Fine-grained PAT of cambell-prince, access to `cambell-prince/frontaccounting` only, Contents read/write (the minimum for `repository_dispatch`). Rotated before it expires. |
 | `BMS_SSH_KEY` | `bms` environment secret | Private half of the dedicated ed25519 deploy key |
 | `BMS_KNOWN_HOSTS` | `bms` environment secret | aws1's ed25519 host key, pinned after comparing fingerprints |
-| `DEPLOY_HOST`, `DEPLOY_USER` | `bms` environment variables | Passed as `host=` and `user=`. Named so they don't clobber the runner's `$USER`. |
+| `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH` | `bms` environment variables | Passed as `host=`, `user=` and `path=`, so CI deploys to `<user>@<host>:<path>`. Named so they don't clobber the runner's `$USER`. `DEPLOY_PATH` is `/` because rrsync roots the key at the site directory (see "The server" below). |
 
 The `bms` environment only allows deployments from `master-cp`, so workflows on
 other branches and pull requests cannot read the key.
@@ -226,9 +226,14 @@ The runbook covers the details. In summary:
   - It has no shell or forwarding and cannot reach anything outside the site
     directory.
   - It has no `-no-del`, so deploys can remove stale files.
-  - The workflow therefore uses `path=/`, which rrsync maps to the site
-    directory. Deploys from a workstation keep using `bms/htdocs/` with your
-    own key.
+  - rrsync resolves every client path relative to that directory, so
+    `DEPLOY_PATH` is `/`. A value of `bms/htdocs/` would write to
+    `~/bms/htdocs/bms/htdocs/`. The site directory is fixed on the server in
+    `authorized_keys`, not in GitHub. Deploys from a workstation use your own,
+    unrestricted key and keep `path=bms/htdocs/`.
+  - Jailing at the home directory instead, so the path could read
+    `bms/htdocs/`, was rejected: the key could then overwrite
+    `~/.ssh/authorized_keys` and lift its own restriction.
 - SSH is open to the internet. Key-only authentication plus rrsync is the
   protection, and the runbook confirms password login is off.
 - The dispatch token can only start a deploy, never choose what is deployed:
