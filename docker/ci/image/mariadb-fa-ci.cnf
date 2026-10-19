@@ -1,0 +1,8 @@
+# Parity with the plugins' old MariaDB 10.11 test stacks, where utf8mb4's
+# default collation was utf8mb4_general_ci. MariaDB 11.x (Debian trixie)
+# defaults utf8mb4 to utf8mb4_uca1400_ai_ci, which reorders some ORDER BY
+# results the plugins' tests depend on.
+[mysqld]
+character-set-server = utf8mb4
+collation-server = utf8mb4_general_ci
+character_set_collations = utf8mb4=utf8mb4_general_ci

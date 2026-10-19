@@ -1,0 +1,31 @@
+name: Deploy scripts
+
+# deploy/test/run.sh: the release, upload, resolve and sql-changes scripts,
+# with local fixtures and no network.
+
+on:
+  push:
+    branches: [master-cp, master-ark]
+    paths:
+      - deploy/**
+      - upload-exclude.txt
+      - makefile.json
+      - .github/workflows/deploy-test.yml
+  pull_request:
+    paths:
+      - deploy/**
+      - upload-exclude.txt
+      - makefile.json
+      - .github/workflows/deploy-test.yml
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test
+        run: deploy/test/run.sh

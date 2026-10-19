@@ -1,0 +1,14 @@
+#!/bin/sh
+# fa-ci-ext-list <installed_extensions.php>: "<id> <package>" for each extension
+# (type 'extension') in a FrontAccounting extension list, in the file's order.
+# A live site's list gives the ids its security roles were built with, so a
+# copy of its database needs its modules registered under the same ids.
+set -eu
+[ "$#" -eq 1 ] || { echo "usage: fa-ci-ext-list <installed_extensions.php>" >&2; exit 2; }
+[ -f "$1" ] || { echo "fa-ci-ext-list: no such file: $1" >&2; exit 2; }
+# shellcheck disable=SC2016 # PHP code, expanded by php
+php -r '
+    $installed_extensions = array();
+    include $argv[1];
+    foreach ($installed_extensions as $id => $e)
+        if (($e["type"] ?? "") === "extension") echo $id, " ", $e["package"], "\n";' "$1"

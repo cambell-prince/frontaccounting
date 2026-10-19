@@ -1,0 +1,15 @@
+#!/bin/sh
+# fa-ci-ext-id <module>: the extension id FrontAccounting gave a module (company
+# 0's list). Ids follow activation order, so anything that encodes a module's
+# security codes -- section (id << 16) | (100 << 8), first area section | 100 --
+# has to be worked out from this. Exits 1 if the module is not registered.
+set -eu
+[ "$#" -eq 1 ] || { echo "usage: fa-ci-ext-id <module>" >&2; exit 2; }
+# shellcheck disable=SC2016 # PHP code, expanded by php
+php -r '
+    $installed_extensions = array();
+    include $argv[1];
+    foreach ($installed_extensions as $id => $e)
+        if ($e["package"] === $argv[2]) { echo $id, "\n"; exit(0); }
+    fwrite(STDERR, "fa-ci-ext-id: " . $argv[2] . " is not registered\n");
+    exit(1);' "${FA_ROOT:-/var/www/html}/company/0/installed_extensions.php" "$1"

@@ -1,0 +1,60 @@
+#!/bin/sh
+# fa-ci-dataset <test|demo|/path/to/file.sql[.gz]>: replace the fa_test database with a dataset.
+#
+#   test  the fixture the image was seeded with (modules/tests/data/fa_test.sql.gz)
+#   demo  FrontAccounting's own sql/en_US-demo.sql: customers, items, orders.
+#         Its fiscal years end in the past, so years are appended until one
+#         covers today.
+#   file  a dump (a backup of a real site), loaded as it is: nothing in it is
+#         changed, and its fiscal years are left alone.
+#
+# Every dataset gets a test/test login (role 2) for the package's helpers.
+# Run as root, before modules are activated, so their update SQL runs on it.
+set -eu
+[ "$#" -eq 1 ] || { echo "usage: fa-ci-dataset <test|demo|/path/to/file.sql[.gz]>" >&2; exit 2; }
+db="${FA_DB_NAME:-fa_test}"
+src="$1"
+extend_years=yes
+
+case "$src" in
+    test) load() { gunzip -c /usr/local/share/fa-ci/fa_test.sql.gz; } ;;
+    demo) load() { cat "${FA_ROOT:-/var/www/html}/sql/en_US-demo.sql"; } ;;
+    /*)
+        [ -f "$src" ] || { echo "fa-ci-dataset: no such file: $src" >&2; exit 2; }
+        extend_years=no
+        case "$src" in
+            *.gz) load() { gunzip -c "$src"; } ;;
+            *) load() { cat "$src"; } ;;
+        esac ;;
+    *) echo "fa-ci-dataset: the dataset is test, demo or an absolute path, not '$src'" >&2; exit 2 ;;
+esac
+
+mariadb -e "DROP DATABASE IF EXISTS \`$db\`; CREATE DATABASE \`$db\`;"
+load | mariadb "$db"
+
+mariadb "$db" <<'SQL'
+INSERT INTO `0_users` (`user_id`, `password`, `real_name`, `role_id`, `email`, `language`)
+SELECT 'test', MD5('test'), 'FA CI', 2, 'test@example.com', 'C'
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM `0_users` WHERE `user_id` = 'test');
+SQL
+
+added=0
+if [ "$extend_years" = yes ]; then
+    while [ "$(mariadb -N "$db" -e "SELECT COUNT(*) FROM \`0_fiscal_year\` WHERE CURDATE() BETWEEN \`begin\` AND \`end\`")" = 0 ]; do
+        [ "$added" -lt 30 ] || { echo "fa-ci-dataset: no fiscal year reaches today after $added" >&2; exit 1; }
+        mariadb "$db" -e "INSERT INTO \`0_fiscal_year\` (\`begin\`, \`end\`, \`closed\`)
+            SELECT MAX(\`end\`) + INTERVAL 1 DAY, MAX(\`end\`) + INTERVAL 1 YEAR, 0 FROM \`0_fiscal_year\`
+            HAVING MAX(\`end\`) IS NOT NULL"
+        added=$((added + 1))
+    done
+    if [ "$added" -gt 0 ]; then
+        mariadb "$db" -e "UPDATE \`0_sys_prefs\` SET \`value\` =
+            (SELECT id FROM \`0_fiscal_year\` WHERE CURDATE() BETWEEN \`begin\` AND \`end\` LIMIT 1)
+            WHERE \`name\` = 'f_year'"
+    fi
+fi
+if [ "$added" -gt 0 ]; then
+    echo "dataset $src loaded ($added fiscal year(s) added to reach today)"
+else
+    echo "dataset $src loaded"
+fi
