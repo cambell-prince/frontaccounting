@@ -1,0 +1,182 @@
+name: Deploy bms
+
+# Deploys bms.saygoweb.com: FrontAccounting master-ark and the extensions its
+# makefile.json lists, each at its newest commit that passed CI
+# (deploy/resolve-refs.sh). It lives on master-cp, the default branch,
+# because GitHub runs workflow_run and repository_dispatch workflows only from
+# there; it builds from master-ark. See deploy/README.md.
+
+on:
+  workflow_run:
+    workflows: [CI image]
+    types: [completed]
+    branches: [master-ark]
+  repository_dispatch:
+    types: [extension-green]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and check only; change nothing on the server
+        type: boolean
+        default: true
+      refs:
+        description: Pin parts instead of resolving them, e.g. "modules/sgw_sales=<sha> frontaccounting=<sha>"
+        type: string
+        default: ''
+      max_deletes:
+        description: Refuse to deploy if more files than this would be deleted
+        type: string
+        default: '25'
+
+permissions:
+  contents: read
+  actions: read
+
+# One at a time. A pending run replaces an older pending one, which is fine:
+# every run resolves afresh.
+concurrency:
+  group: deploy-bms
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name != 'workflow_run'
+      || (github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: bms
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      # A manual run goes live when dry_run is off. An automatic run goes live
+      # only once DEPLOY_LIVE is true, which is set after bms runs 2.4.20.
+      LIVE: ${{ (github.event_name == 'workflow_dispatch' && !inputs.dry_run) || (github.event_name != 'workflow_dispatch' && vars.DEPLOY_LIVE == 'true') }}
+      MAX_DELETES: ${{ inputs.max_deletes || '25' }}
+      REFS: ${{ inputs.refs }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: master-ark
+          fetch-depth: 0
+
+      - name: Say what started this
+        env:
+          PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+          CI_RUN: ${{ github.event.workflow_run.html_url }}
+        run: |
+          echo "event: $GITHUB_EVENT_NAME; live: $LIVE; max_deletes: $MAX_DELETES"
+          [ -z "$CI_RUN" ] || echo "CI image run: $CI_RUN"
+          [ "$GITHUB_EVENT_NAME" != repository_dispatch ] || echo "dispatch: $PAYLOAD"
+
+      - name: Check the settings
+        run: |
+          if [ -z "$DEPLOY_USER" ] || [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_PATH" ]; then
+              echo "::error::Set DEPLOY_USER, DEPLOY_HOST and DEPLOY_PATH in the bms environment"
+              exit 1
+          fi
+          case "$MAX_DELETES" in
+              ''|*[!0-9]*) echo "::error::max_deletes must be a number, not '$MAX_DELETES'"; exit 1 ;;
+          esac
+
+      - name: Resolve
+        id: resolve
+        run: |
+          mkdir -p build
+          # stdout is the outputs; stderr is the human notes, kept for the summary.
+          status=0
+          deploy/resolve-refs.sh master-ark "$(jq -r .variables.components makefile.json)" "$REFS" \
+              > "$RUNNER_TEMP/refs" 2> build/resolve-notes.txt || status=$?
+          cat build/resolve-notes.txt >&2
+          [ "$status" = 0 ] || exit "$status"
+          cat "$RUNNER_TEMP/refs" >> "$GITHUB_OUTPUT"
+          echo "php=$(jq -r .variables.php makefile.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Build the release
+        env:
+          REF: ${{ steps.resolve.outputs.ref }}
+          COMPONENTS: ${{ steps.resolve.outputs.components }}
+          PHP: ${{ steps.resolve.outputs.php }}
+        run: sh deploy/build-release.sh "$REF" build/release "$COMPONENTS" "$PHP"
+
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.BMS_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.BMS_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$SSH_KEY" ] || [ -z "$KNOWN_HOSTS" ]; then
+              echo "::error::Set BMS_SSH_KEY and BMS_KNOWN_HOSTS in the bms environment"
+              exit 1
+          fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/bms_deploy
+          chmod 600 ~/.ssh/bms_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          printf 'Host %s\n  IdentityFile ~/.ssh/bms_deploy\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n  BatchMode yes\n' \
+              "$DEPLOY_HOST" > ~/.ssh/config
+
+      - name: Look for database changes
+        env:
+          COMPONENTS: ${{ steps.resolve.outputs.components }}
+        run: |
+          sh deploy/upload.sh previous build/release "$DEPLOY_USER" "$DEPLOY_HOST" "$DEPLOY_PATH" ""
+          deploy/sql-changes.sh build/release.previous build/release.manifest "$COMPONENTS" \
+              | tee build/sql-changes.txt
+          while IFS= read -r line; do
+              echo "::warning title=Database changes::$line"
+          done < build/sql-changes.txt
+
+      - name: Check
+        run: sh deploy/upload.sh check build/release "$DEPLOY_USER" "$DEPLOY_HOST" "$DEPLOY_PATH" "" "$MAX_DELETES"
+
+      - name: Deploy
+        if: env.LIVE == 'true'
+        run: sh deploy/upload.sh go build/release "$DEPLOY_USER" "$DEPLOY_HOST" "$DEPLOY_PATH" "" yes
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+              if [ "$LIVE" = true ]; then
+                  echo "## bms deploy"
+              else
+                  echo "## bms deploy: dry run, nothing changed on the server"
+              fi
+              if [ -s build/resolve-notes.txt ]; then
+                  printf '\n### What was resolved\n\n```\n'
+                  cat build/resolve-notes.txt
+                  printf '```\n'
+              fi
+              if [ -f build/release.manifest ]; then
+                  printf '\n```\n'
+                  cat build/release.manifest
+                  printf '```\n'
+              fi
+              if [ -s build/sql-changes.txt ]; then
+                  printf '\n### Database changes to apply by hand\n\n'
+                  sed 's/^/- /' build/sql-changes.txt
+              fi
+              if [ -s build/release.deletes ]; then
+                  printf '\n### Files deleted from the server\n\n'
+                  sed 's/.*/- BT&BT/' build/release.deletes | sed 's/BT/\x60/g'
+              fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: bms-release
+          path: |
+            build/release.manifest
+            build/release.check
+            build/release.deletes
+            build/sql-changes.txt
+            build/resolve-notes.txt
+          if-no-files-found: ignore

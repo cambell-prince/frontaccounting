@@ -74,3 +74,48 @@ names the commits it is running.
 
 `install/` and `sql/` are never uploaded. If the server has an `install/`
 directory from the original installation, delete it by hand.
+
+## Deploying bms from GitHub
+
+`.github/workflows/deploy-bms.yml` deploys bms.saygoweb.com. It lives on
+`master-cp`, the default branch, because GitHub only runs `workflow_run` and
+`repository_dispatch` workflows from there. It builds from `master-ark`. It
+runs when:
+
+- the CI image workflow succeeds on a push to `master-ark`;
+- an extension's `notify-deploy.yml` sends `extension-green` after its CI
+  succeeds on its deploy branch;
+- someone runs it by hand.
+
+Each run pins FrontAccounting and every extension in `master-ark`'s
+`components` to its newest commit that passed CI (`deploy/resolve-refs.sh`).
+It then builds the release, lists any `sql/` changes since the server's
+`.deploy-manifest` (`deploy/sql-changes.sh`), runs `deploy-check` with a limit
+of 25 deletes, and uploads. Runs queue one behind another.
+
+The `bms` environment holds:
+
+| name | kind | value |
+| --- | --- | --- |
+| `BMS_SSH_KEY` | secret | the deploy key, forced on the server through `rrsync <site directory>` |
+| `BMS_KNOWN_HOSTS` | secret | the server's pinned host key |
+| `DEPLOY_USER`, `DEPLOY_HOST` | variables | the site user and the server |
+| `DEPLOY_PATH` | variable | `/`. rrsync roots it at the site directory, so `bms/htdocs/` would land in `bms/htdocs/bms/htdocs/`. |
+| `DEPLOY_LIVE` | variable | `true` lets automatic runs deploy; anything else keeps them dry |
+
+The extensions dispatch with `FA_DEPLOY_DISPATCH`, a saygoweb organisation
+secret. It is a fine-grained token with Contents read/write on this
+repository only.
+
+By hand:
+
+    gh workflow run deploy-bms.yml -R cambell-prince/frontaccounting                  # dry run
+    gh workflow run deploy-bms.yml -R cambell-prince/frontaccounting -f dry_run=false
+    gh workflow run deploy-bms.yml -R cambell-prince/frontaccounting -f dry_run=false \
+        -f refs="modules/sgw_sales=<sha>"                                             # pin a part
+
+To roll back, revert the bad commit; its CI deploys the revert. To stop
+deploys, `gh workflow disable deploy-bms.yml -R cambell-prince/frontaccounting`.
+Database changes are never applied by the deploy: the run's summary lists
+them. When a component resolves to its last green commit rather than its head,
+the summary's "What was resolved" section says so.
