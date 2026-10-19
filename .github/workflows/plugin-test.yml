@@ -151,8 +151,20 @@ jobs:
           fa-ci/docker/ci/plugin-test.sh "${args[@]}" plugin -- "$TEST"
       # The checkout is bind-mounted into the container (plugin-test.sh), so the
       # file the test command wrote there is on the runner.
+      # Secrets can't be tested in a step `if:`, so read the token through env.
+      # Without it (pull requests from forks, Dependabot) the upload is skipped.
+      - name: Check for a Codecov token
+        id: codecov
+        env:
+          CODECOV_TOKEN: ${{ secrets.codecov-token }}
+        run: |
+          if [ -n "$CODECOV_TOKEN" ]; then
+            echo "has_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_token=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Upload coverage
-        if: inputs.coverage != ''
+        if: inputs.coverage != '' && steps.codecov.outputs.has_token == 'true'
         uses: codecov/codecov-action@v5
         with:
           files: plugin/${{ inputs.coverage }}

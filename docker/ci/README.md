@@ -44,20 +44,27 @@ Inputs:
 - Secret `clone-token`: for private `with` repos.
 - `coverage` and secret `codecov-token`: `coverage` is a Clover file the test
   command writes, relative to the plugin checkout; when set, it is uploaded to
-  Codecov with the token. A second job reports coverage:
+  Codecov with the token. The upload is skipped, not failed, when the secret is
+  empty (pull requests from forks and Dependabot get no secrets); when it runs,
+  an upload error fails the job. The coverage job to add to a plugin's workflow
+  is in the header of `.github/workflows/plugin-test.yml`.
+
+Coverage notes:
+
+- The plugin is mounted at `/var/www/html/modules/<name>`, so the Clover file
+  lists container paths. Map them back in the plugin's `codecov.yml`:
 
 ```yaml
-  coverage:
-    uses: cambell-prince/frontaccounting/.github/workflows/plugin-test.yml@master-cp
-    with:
-      fa: cp
-      php: '8.3'
-      setup: composer install --no-interaction --no-progress
-      test: sh tools/coverage.sh
-      coverage: build/coverage.xml
-    secrets:
-      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+fixes:
+  - "/var/www/html/modules/<name>/::"
 ```
+
+- xdebug is installed in the image but disabled, so a plain
+  `phpunit --coverage-clover` finds no coverage driver and writes no file. The
+  test command must load it, for example with an extra scan directory holding
+  `zend_extension=xdebug`, and set `XDEBUG_MODE=coverage`. If it runs composer,
+  also set `COMPOSER_ALLOW_XDEBUG=1` and `COMPOSER_PROCESS_TIMEOUT=0`. See
+  `tools/coverage.sh` in the mcp module for a working script.
 
 ## Locally
 
