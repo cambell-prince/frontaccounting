@@ -37,8 +37,9 @@ jobs:
     container: debian:trixie
     timeout-minutes: 10
     steps:
-      - name: Install rsync
-        run: apt-get update -qq && apt-get install -y -qq rsync python3
+      # git, or checkout falls back to the archive, which export-ignores deploy/
+      - name: Install rsync and git
+        run: apt-get update -qq && apt-get install -y -qq rsync python3 git
       - uses: actions/checkout@v7
       - name: Test
         run: bash deploy/test/upload.sh
