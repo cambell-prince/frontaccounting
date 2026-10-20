@@ -29,3 +29,17 @@ jobs:
       - uses: actions/checkout@v7
       - name: Test
         run: deploy/test/run.sh
+
+  # bms runs Debian trixie, whose rrsync (rsync 3.4+) reports a missing file
+  # differently from Ubuntu's.
+  upload-trixie:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 10
+    steps:
+      # git, or checkout falls back to the archive, which export-ignores deploy/
+      - name: Install rsync and git
+        run: apt-get update -qq && apt-get install -y -qq rsync python3 git
+      - uses: actions/checkout@v7
+      - name: Test
+        run: bash deploy/test/upload.sh
