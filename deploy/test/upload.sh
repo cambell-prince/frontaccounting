@@ -137,6 +137,10 @@ if command -v rrsync >/dev/null; then
     make_server "$srv"
     rr() { (cd "$root" && UPLOAD_RSH="$work/ssh-rrsync" RRSYNC_ROOT="$srv" sh deploy/upload.sh "$@"); }
     expect_status 0 "rrsync: previous with none recorded" rr previous "$rel" u h / ""
+    expect_contains "rrsync: says so" "no previous deploy" "$OUT"
+    expect_status 0 "rrsync: and leaves an empty file" test -f "$rel.previous" -a ! -s "$rel.previous"
+    expect_status 1 "rrsync: previous with a missing directory fails" rr previous "$rel" u h /nodir/ ""
+    expect_absent "rrsync: and does not call it 'none recorded'" "no previous deploy" "$OUT"
     expect_status 0 "rrsync: check" rr check "$rel" u h / ""
     expect_contains "rrsync: / is the site" "stale.php" "$(cat "$rel.deletes")"
     expect_status 0 "rrsync: go accepts upload.sh's options" rr go "$rel" u h / "" yes
