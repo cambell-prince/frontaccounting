@@ -50,7 +50,12 @@ if [ "$mode" = previous ]; then
     rm -f "$out" "$out.err"
     if rsync -t --rsync-path="$rsync_path" --rsh="$rsh" "${dest}.deploy-manifest" "$out" 2> "$out.err"; then
         echo "==> previous deploy: $(head -2 "$out" | tail -1)"
-    elif grep -q '\.deploy-manifest".*No such file' "$out.err"; then
+    # rsync names the missing file in quotes. rrsync 3.4+ (Debian trixie) opens
+    # the path itself and says the same of a missing file and a missing
+    # directory, so with it the directory has to list as well.
+    elif grep -q '\.deploy-manifest".*No such file' "$out.err" \
+        || { grep -q 'rrsync error: .*/\.deploy-manifest No such file' "$out.err" \
+            && rsync --list-only --rsync-path="$rsync_path" --rsh="$rsh" "$dest" > /dev/null 2>&1; }; then
         : > "$out"
         echo "==> no previous deploy recorded on $dest"
     else
