@@ -1,0 +1,123 @@
+#!/bin/sh
+#
+# fa-module: a FrontAccounting module's version, _init/config and release
+# packages, from its git history
+# (docs/superpowers/specs/2026-10-21-module-releases-design.md).
+#
+#   fa-module version [dir]                       M, then <FA_LINE>-<M>
+#   fa-module config [dir]                        write <dir>/_init/config
+#   fa-module package [--allow-dirty] [dir] [out] the .tgz and .zip in out
+#                                                 (default <dir>/build/dist)
+#
+# <dir> defaults to the current directory; its basename is the module's id.
+
+set -eu
+
+FA_LINE=2.4      # the FrontAccounting release line modules are built for
+FA_PHP=7.4.33    # the PHP a package's vendor/ is resolved for
+
+die() { echo "fa-module: $*" >&2; exit 1; }
+
+# module_version <dir>: M (spec §1)
+module_version() {
+    d=$1
+    git -C "$d" rev-parse --git-dir >/dev/null 2>&1 || die "$d is not a git repository"
+    [ "$(git -C "$d" rev-parse --is-shallow-repository)" = false ] \
+        || die "$d is a shallow clone: fetch its history and tags (git fetch --unshallow --tags)"
+    # Only tags of digits and dots (with an optional leading v) are versions:
+    # v1.0.0-rc1 and 2024-10-01 are skipped. With several on HEAD, the highest.
+    here_tag="$(git -C "$d" tag --points-at HEAD --list 'v[0-9]*' '[0-9]*' | grep -v '[^0-9.v]' | sort -V | tail -n 1)" || true
+    if [ -n "$here_tag" ]; then
+        m=${here_tag#v}
+        case $m in *[!0-9.]*) die "tag '$here_tag' is not a version" ;; esac
+    elif desc="$(git -C "$d" describe --tags --long --abbrev=7 --match 'v[0-9]*' --match '[0-9]*' --exclude '*[!0-9.v]*' 2>/dev/null)"; then
+        sha=${desc##*-}; rest=${desc%-*}; n=${rest##*-}; tag=${rest%-*}; tag=${tag#v}
+        case $tag in ''|*[!0-9.]*) die "tag '$tag' is not a version" ;; esac
+        m="$tag-$n-$sha"
+    else
+        m="0.0.0-$(git -C "$d" rev-list --count HEAD)-g$(git -C "$d" rev-parse --short=7 HEAD)"
+    fi
+    [ -z "$(git -C "$d" status --porcelain --untracked-files=no)" ] || m="$m+dirty"
+    echo "$m"
+}
+
+# module_name <dir> <id>: composer.json extra.fa-module.name, else <id>
+module_name() {
+    name=''
+    if [ -f "$1/composer.json" ] && command -v php >/dev/null 2>&1; then
+        name="$(php -r '$j = json_decode(file_get_contents($argv[1]), true);
+            echo isset($j["extra"]["fa-module"]["name"]) ? $j["extra"]["fa-module"]["name"] : "";' "$1/composer.json")"
+    fi
+    echo "${name:-$2}"
+}
+
+# write_config <module dir> <target dir> <M>
+# Sets Package, Name and Version in <target dir>/_init/config; any other key
+# already there (Description, Depends, ...) stays.
+write_config() {
+    id=$(basename "$1")
+    name="$(module_name "$1" "$id")" || return 1
+    mkdir -p "$2/_init"
+    old="$2/_init/config"; [ -f "$old" ] || old=/dev/null
+    FA_P=$id FA_N=$name FA_V="$FA_LINE-$3" awk '
+        /^Package:/ { print "Package: " ENVIRON["FA_P"]; p = 1; next }
+        /^Name:/    { print "Name: " ENVIRON["FA_N"]; n = 1; next }
+        /^Version:/ { print "Version: " ENVIRON["FA_V"]; v = 1; next }
+        /^[ \t]*$/  { blanks++; next }
+        { while (blanks > 0) { print ""; blanks-- } print }
+        END {
+            if (!p) print "Package: " ENVIRON["FA_P"]
+            if (!n) print "Name: " ENVIRON["FA_N"]
+            if (!v) print "Version: " ENVIRON["FA_V"]
+            print ""
+        }' "$old" > "$2/_init/config.new" || { rm -f "$2/_init/config.new"; return 1; }
+    mv "$2/_init/config.new" "$2/_init/config"
+}
+
+composer_install() { # composer_install <dir>
+    cp "$1/composer.json" "$1/.composer.json.orig"
+    if command -v composer >/dev/null 2>&1; then
+        (cd "$1" && composer config platform.php "$FA_PHP" \
+            && composer install --no-dev --optimize-autoloader --no-interaction --no-progress)
+    else
+        docker run --rm -u "$(id -u):$(id -g)" -v "$1":/app -w /app composer:2 sh -c \
+            "composer config platform.php '$FA_PHP' && composer install --no-dev --optimize-autoloader --no-interaction --no-progress"
+    fi >&2 || { mv "$1/.composer.json.orig" "$1/composer.json"; die "composer install failed"; }
+    mv "$1/.composer.json.orig" "$1/composer.json"
+}
+
+package() {
+    allow_dirty=false
+    if [ "${1:-}" = --allow-dirty ]; then allow_dirty=true; shift; fi
+    d="$(cd "${1:-.}" && pwd)"
+    out="${2:-$d/build/dist}"
+    for tool in git tar zip; do command -v "$tool" >/dev/null 2>&1 || die "$tool is not installed"; done
+    m="$(module_version "$d")" || exit 1
+    tree=HEAD
+    case $m in
+        *+dirty)
+            $allow_dirty || die "$d has uncommitted changes: commit them, or pass --allow-dirty"
+            tree="$(git -C "$d" stash create)" ;;
+    esac
+    id=$(basename "$d")
+    stage="$(mktemp -d)"
+    trap 'rm -rf "$stage"' EXIT
+    git -C "$d" archive --format=tar "$tree" | tar -x -C "$stage"
+    [ ! -f "$stage/composer.json" ] || composer_install "$stage"
+    write_config "$d" "$stage" "$m"
+    mkdir -p "$out"; out="$(cd "$out" && pwd)"
+    base="frontaccounting-$FA_LINE-$id.module.$m"
+    rm -f "$out/$base.tgz" "$out/$base.zip"
+    (cd "$stage" && ls -A | tar -czf "$out/$base.tgz" -T -)
+    (cd "$stage" && zip -r -y -q "$out/$base.zip" .)
+    echo "$out/$base.tgz"
+    echo "$out/$base.zip"
+}
+
+cmd="${1:-}"; [ $# -eq 0 ] || shift
+case $cmd in
+    version) d="$(cd "${1:-.}" && pwd)"; m="$(module_version "$d")" || exit 1; echo "$m"; echo "$FA_LINE-$m" ;;
+    config) d="$(cd "${1:-.}" && pwd)"; m="$(module_version "$d")" || exit 1; write_config "$d" "$d" "$m" ;;
+    package) package "$@" ;;
+    *) die "usage: fa-module version|config [dir] | package [--allow-dirty] [dir] [out]" ;;
+esac

@@ -1,7 +1,7 @@
 name: Deploy scripts
 
 # deploy/test/run.sh: the release, upload, resolve and sql-changes scripts,
-# with local fixtures and no network.
+# with local fixtures and no network; and the local-extension version test.
 
 on:
   push:
@@ -10,12 +10,20 @@ on:
       - deploy/**
       - upload-exclude.txt
       - makefile.json
+      - docker/ci/fa-module
+      - admin/includes/local_versions.inc
+      - admin/inst_module.php
+      - modules/tests/local_versions_test.php
       - .github/workflows/deploy-test.yml
   pull_request:
     paths:
       - deploy/**
       - upload-exclude.txt
       - makefile.json
+      - docker/ci/fa-module
+      - admin/includes/local_versions.inc
+      - admin/inst_module.php
+      - modules/tests/local_versions_test.php
       - .github/workflows/deploy-test.yml
 
 permissions:
@@ -29,6 +37,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Test
         run: deploy/test/run.sh
+      - name: Local extension versions
+        run: php modules/tests/local_versions_test.php
 
   # bms runs Debian trixie, whose rrsync (rsync 3.4+) reports a missing file
   # differently from Ubuntu's.
