@@ -51,8 +51,11 @@ upload-exclude*.txt
 /lang/installed_languages.inc
 
 # Extensions: their tests, docs and local data are not deployed, and their
-# own settings and uploads on the server are left alone
+# own settings and uploads on the server are left alone; FA's repository
+# cache (modules/_cache/*.gz, downloaded by the Install/Activate screens)
+# belongs to the server too
 /modules/tests/
+/modules/_cache/*.gz
 /modules/*/tests/
 /modules/*/docs/
 /modules/*/backup/
