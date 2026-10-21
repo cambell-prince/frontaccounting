@@ -10,12 +10,14 @@ on:
       - deploy/**
       - upload-exclude.txt
       - makefile.json
+      - docker/ci/fa-module
       - .github/workflows/deploy-test.yml
   pull_request:
     paths:
       - deploy/**
       - upload-exclude.txt
       - makefile.json
+      - docker/ci/fa-module
       - .github/workflows/deploy-test.yml
 
 permissions:

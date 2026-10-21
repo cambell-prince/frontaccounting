@@ -169,6 +169,39 @@ directory's name. Shallow clones are refused. It is used by
 `deploy/build-release.sh` and the reusable module release workflow; its tests
 are `deploy/test/fa-module.sh`.
 
+## Releasing a module
+
+A module is released by pushing a `v<major>.<minor>.<patch>` tag on its deploy
+branch. Its `.github/workflows/release.yml` runs the module's tests, then calls
+the reusable `plugin-release.yml`, which packages the module with `fa-module`
+and publishes a GitHub release with the `.tgz` and `.zip`:
+
+```yaml
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  test:
+    # the same plugin-test.yml calls as the module's ci.yml
+  release:
+    needs: [test]
+    permissions:
+      contents: write
+    uses: cambell-prince/frontaccounting/.github/workflows/plugin-release.yml@master-cp
+    with:
+      module: mcp           # the folder name and FrontAccounting extension id
+      deploy-branch: main
+```
+
+The workflow refuses to publish when the tag is not exactly `vX.Y.Z`, when the
+tagged commit is not on `deploy-branch`, or when a release for the tag already
+exists (it never overwrites; fix a bad release with a new patch tag). The
+release notes are the module's `CHANGELOG.md` section whose `## ` heading names
+the version (`## 1.2.3 - date`, `## [1.2.3]`), else GitHub's generated notes.
+
 ## Working on the package
 
     docker/ci/build-image.sh cp 7.4 fa-ci:local-cp-7.4
