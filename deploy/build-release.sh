@@ -42,6 +42,8 @@ rm -rf "$dir"
 mkdir -p "$dir"
 dir="$(cd "$dir" && pwd)"    # absolute, for docker's bind mount
 
+fa_module="$(dirname "$0")/../docker/ci/fa-module"
+
 is_sha() { [ "${#1}" -eq 40 ] && case "$1" in *[!0-9a-f]*) false ;; *) true ;; esac; }
 
 sha="$(git rev-parse --verify "$ref^{commit}")"
@@ -68,14 +70,18 @@ for component in $components; do
 
     echo "==> $path: $repo @ $cref"
     rm -rf "${dir:?}/$path"
+    # Full history and tags, without file contents (a partial clone), so
+    # fa-module can describe the commit.
     if is_sha "$cref"; then
         git init --quiet "$dir/$path"
-        git -C "$dir/$path" fetch --quiet --depth 1 "$repo" "$cref"
+        git -C "$dir/$path" fetch --quiet --filter=blob:none --tags "$repo" "$cref"
         git -C "$dir/$path" -c advice.detachedHead=false checkout --quiet FETCH_HEAD
     else
-        git clone --quiet --depth 1 --branch "$cref" "$repo" "$dir/$path"
+        git clone --quiet --filter=blob:none --branch "$cref" "$repo" "$dir/$path"
     fi
+    sh "$fa_module" config "$dir/$path"
     echo "$path $cref $(git -C "$dir/$path" log -1 --format='%H %s')" >> "$dir.manifest"
+    echo "    version: $(sh "$fa_module" version "$dir/$path" | sed -n 2p)" >> "$dir.manifest"
     rm -rf "$dir/$path/.git"
 
     if [ -f "$dir/$path/composer.json" ]; then
