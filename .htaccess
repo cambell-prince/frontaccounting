@@ -12,6 +12,15 @@
 	Satisfy All
 </FilesMatch>
 
+# OAuth metadata for the MCP module (modules/mcp/README.md). RFC 8414 puts the
+# metadata of the issuer https://host/modules/mcp at the origin root, which the
+# module cannot serve by itself. Without this, MCP clients find no
+# authorization server and fall back to POST /register, which 404s.
+<IfModule mod_rewrite.c>
+	RewriteEngine On
+	RewriteRule ^\.well-known/(oauth-authorization-server|openid-configuration|oauth-protected-resource)/modules/mcp/?$ modules/mcp/.well-known/$1 [L]
+</IfModule>
+
 # Disable directory listings.
 Options -Indexes
 
