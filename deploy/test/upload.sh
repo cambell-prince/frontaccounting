@@ -34,9 +34,10 @@ chmod +x "$work/ssh" "$work/ssh-rrsync"
 # make_release <dir>: a release as build-release.sh leaves it
 make_release() {
     rm -rf "$1" "$1.ok"
-    mkdir -p "$1/modules/ext"
+    mkdir -p "$1/modules/ext" "$1/modules/_cache"
     echo new > "$1/index.php"
     echo ext > "$1/modules/ext/a.php"
+    echo cache > "$1/modules/_cache/index.php"
     printf 'built test\nfrontaccounting HEAD %s test\n' "$(printf '%040d' 1)" > "$1.manifest"
     cp "$1.manifest" "$1/.deploy-manifest"
     touch "$1.ok"
@@ -44,7 +45,7 @@ make_release() {
 # make_server <dir>: what is live before a deploy
 make_server() {
     rm -rf "$1"
-    mkdir -p "$1/modules/ext" "$1/modules/mcp" "$1/modules/other" "$1/company/0"
+    mkdir -p "$1/modules/ext" "$1/modules/mcp" "$1/modules/other" "$1/modules/_cache" "$1/company/0"
     echo old > "$1/index.php"
     echo stale > "$1/stale.php"
     echo server > "$1/config.php"
@@ -52,6 +53,8 @@ make_server() {
     echo old > "$1/modules/ext/old.php"
     echo server > "$1/modules/mcp/config_mcp.php"
     echo installed > "$1/modules/other/x.php"
+    # FA's extension repository cache, which the release carries the folder of
+    echo cached > "$1/modules/_cache/Release.gz"
     echo data > "$1/company/0/file"
     # older than the release, so rsync's size+mtime check can't skip a file
     # whose content differs but whose size matches ("old" and "new")
@@ -119,7 +122,7 @@ expect_status 0 "go" up go "$rel" u h "$srv/" "" yes
 expect_status 0 "stale.php is gone" test ! -e "$srv/stale.php"
 expect_status 0 "the stale module file is gone" test ! -e "$srv/modules/ext/old.php"
 expect_contains "index.php is the release's" "new" "$(cat "$srv/index.php")"
-for keep in config.php config_db.php modules/mcp/config_mcp.php modules/other/x.php company/0/file; do
+for keep in config.php config_db.php modules/mcp/config_mcp.php modules/other/x.php modules/_cache/Release.gz company/0/file; do
     expect_status 0 "$keep survives" test -f "$srv/$keep"
 done
 expect_contains "config.php is still the server's" "server" "$(cat "$srv/config.php")"
