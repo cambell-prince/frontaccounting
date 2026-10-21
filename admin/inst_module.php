@@ -23,6 +23,7 @@ include_once($path_to_root . "/includes/date_functions.inc");
 include_once($path_to_root . "/admin/db/company_db.inc");
 include_once($path_to_root . "/admin/db/maintenance_db.inc");
 include_once($path_to_root . "/includes/ui.inc");
+include_once($path_to_root . "/admin/includes/local_versions.inc");
 
 simple_page_mode(true);
 
@@ -242,6 +243,10 @@ if ($Mode == 'RESET')
 }
 
 //---------------------------------------------------------------------------------------------
+// Local extensions: take the live version from modules/<id>/_init/config.
+if (($new_exts = refresh_local_versions(get_company_extensions(), $path_to_root)) !== false)
+	update_extensions($new_exts);
+
 start_form(true);
 if (list_updated('extset'))
 	$Ajax->activate('_page_body');
