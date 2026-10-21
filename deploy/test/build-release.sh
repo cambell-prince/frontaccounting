@@ -70,4 +70,20 @@ expect_status 0 "builds a commit after the tag" build HEAD "$b" "modules/ext|fil
 expect_contains "version after a tag, from a commit ref" "Version: 2.4-2.0.0-1-g$third" "$(cat "$b/modules/ext/_init/config")"
 expect_status 0 "still no .git" test ! -e "$b/modules/ext/.git"
 
+# A component whose version cannot be worked out fails the build: run a copy
+# of the script beside an fa-module that fails.
+mkdir -p "$work/stub/deploy" "$work/stub/docker/ci"
+cp "$root/deploy/build-release.sh" "$work/stub/deploy/"
+printf '#!/bin/sh\n[ "$1" != version ] || { echo "fa-module: no version" >&2; exit 1; }\n' > "$work/stub/docker/ci/fa-module"
+stubbed() { (cd "$work/fa" && sh "$work/stub/deploy/build-release.sh" "$@"); }
+expect_status 1 "a component with no version fails the build" stubbed HEAD "$b" "modules/ext|file://$work/ext|main" 7.4.33
+expect_status 0 "and leaves no .ok" test ! -f "$b.ok"
+expect_absent "and no 'version:' line with nothing after it" "version: " "$(cat "$b.manifest")"
+
+# A component given as a plain local path (no file://) still builds.
+expect_status 0 "builds a component from a plain path" build HEAD "$b" "modules/ext|$work/ext|main" 7.4.33
+expect_contains "plain path: checks out the head" "three" "$(cat "$b/modules/ext/a.txt")"
+expect_status 0 "builds a plain-path component at a commit" build HEAD "$b" "modules/ext|$work/ext|$first" 7.4.33
+expect_contains "plain path: exactly that commit" "one" "$(cat "$b/modules/ext/a.txt")"
+
 finish

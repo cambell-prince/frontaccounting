@@ -68,20 +68,32 @@ for component in $components; do
         *) echo "build-release: '$mode' in '$component' is not nodev, dev or legacy" >&2; exit 1 ;;
     esac
 
+    # git ignores --filter for a plain path; give it a URL.
+    case "$repo" in
+        *://*|*@*:*|[!/]*:*) ;;
+        *) repo="file://$(cd "$repo" && pwd)" ;;
+    esac
+
     echo "==> $path: $repo @ $cref"
     rm -rf "${dir:?}/$path"
-    # Full history and tags, without file contents (a partial clone), so
-    # fa-module can describe the commit.
+    # Full history and tags, without trees or file contents (a partial clone;
+    # checkout fetches what it needs), so fa-module can describe the commit.
     if is_sha "$cref"; then
         git init --quiet "$dir/$path"
-        git -C "$dir/$path" fetch --quiet --filter=blob:none --tags "$repo" "$cref"
+        git -C "$dir/$path" fetch --quiet --filter=tree:0 --tags "$repo" "$cref"
         git -C "$dir/$path" -c advice.detachedHead=false checkout --quiet FETCH_HEAD
     else
-        git clone --quiet --filter=blob:none --branch "$cref" "$repo" "$dir/$path"
+        git clone --quiet --filter=tree:0 --branch "$cref" "$repo" "$dir/$path"
     fi
-    sh "$fa_module" config "$dir/$path"
+    # Worked out before config writes _init/config, and checked: a failure
+    # inside $(...) in an argument would not stop the build.
+    versions="$(sh "$fa_module" version "$dir/$path")" \
+        || { echo "build-release: cannot work out the version of $path" >&2; exit 1; }
+    version="$(printf '%s\n' "$versions" | sed -n 2p)"
+    [ -n "$version" ] || { echo "build-release: no version for $path" >&2; exit 1; }
+    sh "$fa_module" config "$dir/$path" || exit 1
     echo "$path $cref $(git -C "$dir/$path" log -1 --format='%H %s')" >> "$dir.manifest"
-    echo "    version: $(sh "$fa_module" version "$dir/$path" | sed -n 2p)" >> "$dir.manifest"
+    echo "    version: $version" >> "$dir.manifest"
     rm -rf "$dir/$path/.git"
 
     if [ -f "$dir/$path/composer.json" ]; then

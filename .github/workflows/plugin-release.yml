@@ -86,9 +86,10 @@ jobs:
           MODULE: ${{ inputs.module }}
           TAG: ${{ github.ref_name }}
         run: |
-          # composer's output shares stdout with the two paths; the paths are the last two lines.
-          sh fa/docker/ci/fa-module package "$MODULE" "$RUNNER_TEMP/dist" | tee "$RUNNER_TEMP/package.out"
-          files="$(tail -n 2 "$RUNNER_TEMP/package.out")"
+          # fa-module prints exactly the two archive paths on stdout.
+          files="$(sh fa/docker/ci/fa-module package "$MODULE" "$RUNNER_TEMP/dist")"
+          [ "$(printf '%s\n' "$files" | wc -l)" -eq 2 ] \
+              || { echo "::error::fa-module did not print two archive paths"; exit 1; }
           for f in $files; do
               [ -f "$f" ] || { echo "::error::fa-module did not produce $f"; exit 1; }
           done

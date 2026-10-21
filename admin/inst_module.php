@@ -73,7 +73,7 @@ function handle_delete($id)
 	
 	$extensions = get_company_extensions();
 	$ext = $extensions[$id];
-	if ($ext['version'] != '-') {
+	if (is_repository_package($ext)) {
 		if (!uninstall_package($ext['package']))
 			return false;
 	} else {

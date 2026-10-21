@@ -27,6 +27,15 @@ function read_local_version($file)
 }
 
 /*
+	Is this extension installed from FA's package repository (it has a package
+	in the cache), as opposed to a local one that sits in modules/<id>?
+*/
+function is_repository_package($ext)
+{
+	return isset($ext['package']) && (bool)installed_package($ext['package']);
+}
+
+/*
 	A local extension (installed from modules/<id>, not from FA's package
 	repository) carries its version in modules/<id>/_init/config, written by
 	its build. FA reads it only at install, so an upgrade by file sync would
@@ -40,7 +49,7 @@ function refresh_local_versions($exts, $root)
 		if (@$ext['type'] != 'extension' || !isset($ext['package']))
 			continue;
 		$id = clean_file_name($ext['package']);
-		if (@$ext['path'] !== 'modules/'.$id)
+		if (@$ext['path'] !== 'modules/'.$id || is_repository_package($ext))
 			continue;
 		$version = read_local_version($root.'/modules/'.$id.'/_init/config');
 		if ($version === null || $version === @$ext['version'])
