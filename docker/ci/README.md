@@ -149,6 +149,59 @@ to a role, e.g. role 2 for a dataset user your tests sign in as.
 kept in `/var/mail-catcher/*.eml`. On failure the run prints the tails of FA's
 `tmp/errors.log` and Apache's error log.
 
+## fa-module
+
+`docker/ci/fa-module` gives a FrontAccounting module a version from its git
+tags and builds its release packages. It is POSIX sh and needs only git, tar
+and zip (plus php, for the module's display name, and composer or docker when
+the module has a `composer.json`).
+
+    sh docker/ci/fa-module version [dir]                      M, then 2.4-M
+    sh docker/ci/fa-module config [dir]                       write <dir>/_init/config
+    sh docker/ci/fa-module package [--allow-dirty] [dir] [out]  .tgz and .zip
+
+`M` is the latest `vX.Y.Z` (or bare `X.Y.Z`) tag, `<tag>-<n>-g<sha>` after it,
+`0.0.0-<count>-g<sha>` with no tag, and `+dirty` if tracked files are
+modified. `package` writes `frontaccounting-2.4-<id>.module.<M>.tgz` and
+`.zip` (default `<dir>/build/dist`) from tracked, non-`export-ignore` files
+plus `_init/config`, and prints their paths. `<id>` is the module
+directory's name. Shallow clones are refused. It is used by
+`deploy/build-release.sh` and the reusable module release workflow; its tests
+are `deploy/test/fa-module.sh`.
+
+## Releasing a module
+
+A module is released by pushing a `v<major>.<minor>.<patch>` tag on its deploy
+branch. Its `.github/workflows/release.yml` runs the module's tests, then calls
+the reusable `plugin-release.yml`, which packages the module with `fa-module`
+and publishes a GitHub release with the `.tgz` and `.zip`:
+
+```yaml
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  test:
+    # the same plugin-test.yml calls as the module's ci.yml
+  release:
+    needs: [test]
+    permissions:
+      contents: write
+    uses: cambell-prince/frontaccounting/.github/workflows/plugin-release.yml@master-cp
+    with:
+      module: mcp           # the folder name and FrontAccounting extension id
+      deploy-branch: main
+```
+
+The workflow refuses to publish when the tag is not exactly `vX.Y.Z`, when the
+tagged commit is not on `deploy-branch`, or when a release for the tag already
+exists (it never overwrites; fix a bad release with a new patch tag). The
+release notes are the module's `CHANGELOG.md` section whose `## ` heading names
+the version (`## 1.2.3 - date`, `## [1.2.3]`), else GitHub's generated notes.
+
 ## Working on the package
 
     docker/ci/build-image.sh cp 7.4 fa-ci:local-cp-7.4

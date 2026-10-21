@@ -1,0 +1,153 @@
+name: Plugin release
+
+# Reusable workflow: package a FrontAccounting module at a pushed v<semver>
+# tag with docker/ci/fa-module and publish it as a GitHub release
+# (docs/superpowers/specs/2026-10-21-module-releases-design.md). A module's
+# release.yml calls it after its tests pass:
+#
+#   on:
+#     push:
+#       tags: ['v*']
+#   jobs:
+#     test: { ... the same plugin-test.yml calls as ci.yml ... }
+#     release:
+#       needs: [test]
+#       permissions:
+#         contents: write
+#       uses: cambell-prince/frontaccounting/.github/workflows/plugin-release.yml@master-cp
+#       with:
+#         module: mcp
+#         deploy-branch: main
+
+on:
+  workflow_call:
+    inputs:
+      module:
+        description: The module's folder name and FrontAccounting extension id
+        type: string
+        required: true
+      deploy-branch:
+        description: The branch a release tag must be on
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check the tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          # Exactly v<major>.<minor>.<patch>; no pre-release or build suffix.
+          if ! printf '%s\n' "$TAG" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
+              echo "::error::'$TAG' is not a v<major>.<minor>.<patch> tag"
+              exit 1
+          fi
+      # The folder name is the module's id: fa-module takes it from the path.
+      - uses: actions/checkout@v7
+        with:
+          path: ${{ inputs.module }}
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/checkout@v7
+        with:
+          repository: cambell-prince/frontaccounting
+          ref: master-cp
+          path: fa
+          sparse-checkout: docker/ci
+      - name: Check the tag is on the deploy branch and not yet released
+        working-directory: ${{ inputs.module }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          BRANCH: ${{ inputs.deploy-branch }}
+        run: |
+          # fetch-depth 0 fetches every branch, so origin/$BRANCH exists.
+          git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH^{commit}" >/dev/null \
+              || { echo "::error::branch $BRANCH was not found on origin"; exit 1; }
+          git merge-base --is-ancestor "refs/tags/$TAG^{commit}" "refs/remotes/origin/$BRANCH" \
+              || { echo "::error::$TAG is not on $BRANCH"; exit 1; }
+          if gh release view "$TAG" >/dev/null 2>&1; then
+              echo "::error::a release for $TAG already exists; tag a new patch version instead"
+              exit 1
+          fi
+      - name: Package
+        id: package
+        env:
+          MODULE: ${{ inputs.module }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          # fa-module prints exactly the two archive paths on stdout.
+          files="$(sh fa/docker/ci/fa-module package "$MODULE" "$RUNNER_TEMP/dist")"
+          [ "$(printf '%s\n' "$files" | wc -l)" -eq 2 ] \
+              || { echo "::error::fa-module did not print two archive paths"; exit 1; }
+          for f in $files; do
+              [ -f "$f" ] || { echo "::error::fa-module did not produce $f"; exit 1; }
+          done
+          version="$(sh fa/docker/ci/fa-module version "$MODULE" | sed -n 1p)"
+          if [ "$version" != "${TAG#v}" ]; then
+              echo "::error::the module's version is '$version', not ${TAG#v}: is the tag on the checked-out commit?"
+              exit 1
+          fi
+          {
+              echo 'files<<FA_MODULE_FILES_EOF'
+              echo "$files"
+              echo 'FA_MODULE_FILES_EOF'
+              echo "version=$version"
+          } >> "$GITHUB_OUTPUT"
+      - name: Release notes
+        working-directory: ${{ inputs.module }}
+        env:
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          # The CHANGELOG section whose "## " heading names this version as a
+          # whole token ("## 1.0.0 - 2026-10-22", "## [1.0.0]", "## v1.0.0"),
+          # not as part of another ("11.0.0", "1.0.0-rc1").
+          : > "$RUNNER_TEMP/notes.md"
+          if [ -f CHANGELOG.md ]; then
+              awk -v v="$VERSION" '
+                  /^## / {
+                      if (on) exit
+                      h = $0
+                      gsub(/[^0-9A-Za-z.+_-]+/, " ", h)
+                      n = split(h, t, " ")
+                      for (i = 1; i <= n; i++) {
+                          s = t[i]; sub(/^v/, "", s); sub(/\.+$/, "", s)
+                          if (s == v) { on = 1; break }
+                      }
+                      next
+                  }
+                  on' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          fi
+      - name: Publish
+        working-directory: ${{ inputs.module }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          MODULE: ${{ inputs.module }}
+          VERSION: ${{ steps.package.outputs.version }}
+          FILES: ${{ steps.package.outputs.files }}
+        run: |
+          mapfile -t files <<< "$FILES"
+          if grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+              notes=(--notes-file "$RUNNER_TEMP/notes.md")
+          else
+              notes=(--generate-notes)
+          fi
+          gh release create "$TAG" "${files[@]}" --verify-tag --title "$MODULE $VERSION" "${notes[@]}"
+      - name: Summary
+        env:
+          FILES: ${{ steps.package.outputs.files }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          { echo "### Released $TAG"; for f in $FILES; do echo "- $(basename "$f")"; done; } >> "$GITHUB_STEP_SUMMARY"
