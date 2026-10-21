@@ -149,6 +149,26 @@ to a role, e.g. role 2 for a dataset user your tests sign in as.
 kept in `/var/mail-catcher/*.eml`. On failure the run prints the tails of FA's
 `tmp/errors.log` and Apache's error log.
 
+## fa-module
+
+`docker/ci/fa-module` gives a FrontAccounting module a version from its git
+tags and builds its release packages. It is POSIX sh and needs only git, tar
+and zip (plus php, for the module's display name, and composer or docker when
+the module has a `composer.json`).
+
+    sh docker/ci/fa-module version [dir]                      M, then 2.4-M
+    sh docker/ci/fa-module config [dir]                       write <dir>/_init/config
+    sh docker/ci/fa-module package [--allow-dirty] [dir] [out]  .tgz and .zip
+
+`M` is the latest `vX.Y.Z` (or bare `X.Y.Z`) tag, `<tag>-<n>-g<sha>` after it,
+`0.0.0-<count>-g<sha>` with no tag, and `+dirty` if tracked files are
+modified. `package` writes `frontaccounting-2.4-<id>.module.<M>.tgz` and
+`.zip` (default `<dir>/build/dist`) from tracked, non-`export-ignore` files
+plus `_init/config`, and prints their paths. `<id>` is the module
+directory's name. Shallow clones are refused. It is used by
+`deploy/build-release.sh` and the reusable module release workflow; its tests
+are `deploy/test/fa-module.sh`.
+
 ## Working on the package
 
     docker/ci/build-image.sh cp 7.4 fa-ci:local-cp-7.4
